@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <h3>Controlled Queue Loader</h3>
+
+  <textarea
+    id="urls"
+    placeholder="Paste one URL per line"
+    rows="5"
+  ></textarea>
+
+  <button id="start">Start</button>
+
+  <div class="status">
+    <div>Status: <span id="status">Idle</span></div>
+    <div>Completed: <span id="completed">0</span></div>
+    <div>Active: <span id="active">0</span></div>
+    <div>Pending: <span id="pending">0</span></div>
+    <div>Failed: <span id="failed">0</span></div>
+  </div>
+
+  <div class="actions">
+    <button id="pause">Pause</button>
+    <button id="resume">Resume</button>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
