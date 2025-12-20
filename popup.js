@@ -1,22 +1,24 @@
-const statusEl = document.getElementById("status");
-const completedEl = document.getElementById("completed");
-const activeEl = document.getElementById("active");
-const pendingEl = document.getElementById("pending");
-const failedEl = document.getElementById("failed");
+const els = {
+  status: document.getElementById("status"),
+  completed: document.getElementById("completed"),
+  active: document.getElementById("active"),
+  pending: document.getElementById("pending"),
+  failed: document.getElementById("failed")
+};
 
+const startBtn = document.getElementById("start");
 const pauseBtn = document.getElementById("pause");
 const resumeBtn = document.getElementById("resume");
-const startBtn = document.getElementById("start");
 const urlsInput = document.getElementById("urls");
 
 function refresh() {
-  chrome.runtime.sendMessage({ type: "STATUS" }, res => {
-    if (!res) return;
-    statusEl.textContent = res.paused ? "Paused" : "Running";
-    completedEl.textContent = res.completed;
-    activeEl.textContent = res.active;
-    pendingEl.textContent = res.pending;
-    failedEl.textContent = res.failed;
+  chrome.runtime.sendMessage({ type: "STATUS" }, r => {
+    if (!r) return;
+    els.status.textContent = r.paused ? "Paused" : "Running";
+    els.completed.textContent = r.completed;
+    els.active.textContent = r.active;
+    els.pending.textContent = r.pending;
+    els.failed.textContent = r.failed;
   });
 }
 
@@ -28,10 +30,10 @@ startBtn.onclick = () => {
 
   if (!urls.length) return;
 
-  chrome.runtime.sendMessage({
-    type: "START_QUEUE",
-    urls
-  }, refresh);
+  chrome.runtime.sendMessage(
+    { type: "START_QUEUE", urls },
+    refresh
+  );
 };
 
 pauseBtn.onclick = () =>
@@ -41,4 +43,4 @@ resumeBtn.onclick = () =>
   chrome.runtime.sendMessage({ type: "RESUME" }, refresh);
 
 refresh();
-setInterval(refresh, 1000);
+setTimeout(refresh, 1000);

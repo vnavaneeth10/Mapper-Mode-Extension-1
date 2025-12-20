@@ -11,5 +11,18 @@
   },
   "action": {
     "default_popup": "popup.html"
+  },
+  "commands": {
+    "mark-done": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+D"
+      },
+      "description": "Mark current task as done"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
   }
 }
