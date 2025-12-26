@@ -1,23 +1,48 @@
-body {
-  font-family: system-ui, sans-serif;
-  width: 260px;
+.popup-container {
   padding: 12px;
+  width: 300px;
+  font-family: system-ui, sans-serif;
 }
 
-textarea {
+.popup-label {
+  font-size: 12px;
+  color: #444;
+}
+
+.popup-textarea {
   width: 100%;
   height: 80px;
-  font-size: 12px;
   margin-bottom: 8px;
 }
 
-button {
-  width: 100%;
-  padding: 6px;
-  margin-bottom: 6px;
+.popup-row {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.popup-input-number {
+  width: 60px;
+}
+
+.popup-button {
+  padding: 6px 10px;
+  font-size: 12px;
+  border-radius: 4px;
+  border: none;
   cursor: pointer;
 }
 
-.status div {
-  font-size: 13px;
+.popup-button.primary {
+  background: #1a73e8;
+  color: #fff;
+}
+
+.popup-button.secondary {
+  background: #e0e0e0;
+}
+
+.popup-status {
+  font-size: 12px;
+  line-height: 1.6;
 }

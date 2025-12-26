@@ -3,23 +3,32 @@
 <head>
   <link rel="stylesheet" href="popup.css">
 </head>
-<body>
-  <h3>Controlled Queue Loader</h3>
+<body class="popup-container">
 
-  <textarea id="urls" placeholder="Paste one URL per line"></textarea>
-  <button id="start">Start</button>
+  <label class="popup-label">URLs (one per line)</label>
+  <textarea id="urls" class="popup-textarea"></textarea>
 
-  <div class="status">
-    <div>Status: <span id="status">Idle</span></div>
-    <div>Completed: <span id="completed">0</span></div>
-    <div>Active: <span id="active">0</span></div>
-    <div>Pending: <span id="pending">0</span></div>
-    <div>Failed: <span id="failed">0</span></div>
+  <div class="popup-row">
+    <label class="popup-label">Max tabs</label>
+    <input id="concurrency" type="number" min="1" max="5" class="popup-input-number">
   </div>
 
-  <div class="actions">
-    <button id="pause">Pause</button>
-    <button id="resume">Resume</button>
+  <div class="popup-row">
+    <button id="start" class="popup-button primary">Start</button>
+    <button id="pause" class="popup-button secondary">Pause</button>
+    <button id="resume" class="popup-button secondary">Resume</button>
+  </div>
+
+  <button id="clear" class="popup-button secondary" style="width:100%">
+    Clear Queue
+  </button>
+
+  <div class="popup-status">
+    Status: <span id="status"></span><br>
+    Active: <span id="active"></span><br>
+    Pending: <span id="pending"></span><br>
+    Completed: <span id="completed"></span><br>
+    Failed: <span id="failed"></span>
   </div>
 
   <script src="popup.js"></script>

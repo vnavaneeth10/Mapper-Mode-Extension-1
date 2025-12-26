@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Controlled Queue Loader",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "description": "Process large batches of URLs with controlled concurrency and manual completion.",
   "permissions": ["tabs", "storage", "scripting"],
   "host_permissions": ["<all_urls>"],
@@ -15,7 +15,7 @@
   "commands": {
     "mark-done": {
       "suggested_key": {
-        "default": "Ctrl+Shift+D"
+        "default": "Ctrl+Shift+W"
       },
       "description": "Mark current task as done"
     }

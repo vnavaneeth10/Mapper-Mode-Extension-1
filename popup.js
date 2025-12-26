@@ -1,46 +1,40 @@
-const els = {
-  status: document.getElementById("status"),
-  completed: document.getElementById("completed"),
-  active: document.getElementById("active"),
-  pending: document.getElementById("pending"),
-  failed: document.getElementById("failed")
-};
+document.addEventListener("DOMContentLoaded", () => {
+  const $ = id => document.getElementById(id);
 
-const startBtn = document.getElementById("start");
-const pauseBtn = document.getElementById("pause");
-const resumeBtn = document.getElementById("resume");
-const urlsInput = document.getElementById("urls");
+  function refresh() {
+    chrome.runtime.sendMessage({ type: "STATUS" }, r => {
+      if (!r) return;
+      $("status").textContent = r.paused ? "Paused" : "Running";
+      $("active").textContent = r.active;
+      $("pending").textContent = r.pending;
+      $("completed").textContent = r.completed;
+      $("failed").textContent = r.failed;
+      $("concurrency").value = r.maxConcurrent;
+    });
+  }
 
-function refresh() {
-  chrome.runtime.sendMessage({ type: "STATUS" }, r => {
-    if (!r) return;
-    els.status.textContent = r.paused ? "Paused" : "Running";
-    els.completed.textContent = r.completed;
-    els.active.textContent = r.active;
-    els.pending.textContent = r.pending;
-    els.failed.textContent = r.failed;
-  });
-}
+  $("start").onclick = () => {
+    const urls = $("urls").value.split("\n").map(u => u.trim()).filter(Boolean);
+    if (urls.length)
+      chrome.runtime.sendMessage({ type: "START_QUEUE", urls }, refresh);
+  };
 
-startBtn.onclick = () => {
-  const urls = urlsInput.value
-    .split("\n")
-    .map(u => u.trim())
-    .filter(Boolean);
+  $("pause").onclick = () =>
+    chrome.runtime.sendMessage({ type: "PAUSE" }, refresh);
 
-  if (!urls.length) return;
+  $("resume").onclick = () =>
+    chrome.runtime.sendMessage({ type: "RESUME" }, refresh);
 
-  chrome.runtime.sendMessage(
-    { type: "START_QUEUE", urls },
-    refresh
-  );
-};
+  $("clear").onclick = () => {
+    if (confirm("Clear all pending URLs? Open tabs will remain open."))
+      chrome.runtime.sendMessage({ type: "CLEAR_QUEUE" }, refresh);
+  };
 
-pauseBtn.onclick = () =>
-  chrome.runtime.sendMessage({ type: "PAUSE" }, refresh);
+  $("concurrency").onchange = () =>
+    chrome.runtime.sendMessage({
+      type: "SET_CONCURRENCY",
+      value: Number($("concurrency").value)
+    });
 
-resumeBtn.onclick = () =>
-  chrome.runtime.sendMessage({ type: "RESUME" }, refresh);
-
-refresh();
-setTimeout(refresh, 1000);
+  refresh();
+});

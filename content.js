@@ -1,78 +1,110 @@
 (() => {
-  // Injects a manual completion button only into tabs explicitly opened by the extension
-  if (window.__QUEUE_MARK_DONE_INJECTED__) return;
-  window.__QUEUE_MARK_DONE_INJECTED__ = true;
+  if (window.__QUEUE_UI__) return;
+  window.__QUEUE_UI__ = true;
 
-  const ID = "queue-mark-done";
-  const hostname = location.hostname;
-  const STORAGE_KEY = `button-pos::${hostname}`;
+  function whenReady(cb) {
+    if (document.readyState !== "loading") cb();
+    else document.addEventListener("DOMContentLoaded", cb, { once: true });
+  }
 
-  const btn = document.createElement("button");
-  btn.id = ID;
-  btn.textContent = "✓ Mark Done";
+  whenReady(() => {
+    /* ---------- Mark Done Button ---------- */
 
-  let isDragging = false;
-  let offsetX = 0;
-  let offsetY = 0;
+    const btn = document.createElement("button");
+    btn.textContent = "✔️ Mark Done";
 
-  btn.style.cssText = `
-    position: fixed;
-    top: 16px;
-    left: 16px;
-    padding: 8px 12px;
-    font-size: 13px;
-    background: rgba(17,17,17,0.85);
-    color: #fff;
-    border: none;
-    border-radius: 6px;
-    cursor: grab;
-    z-index: 2147483647;
-    user-select: none;
-  `;
+    Object.assign(btn.style, {
+      position: "fixed",
+      top: "16px",
+      left: "16px",
+      padding: "8px 12px",
+      background: "#ffffff",
+      color: "#111",
+      border: "1px solid #ccc",
+      borderRadius: "6px",
+      fontSize: "13px",
+      cursor: "grab",
+      zIndex: "2147483647",
+      userSelect: "none"
+    });
 
-  chrome.storage.local.get(STORAGE_KEY, res => {
-    if (res[STORAGE_KEY]) {
-      btn.style.top = `${res[STORAGE_KEY].top}px`;
-      btn.style.left = `${res[STORAGE_KEY].left}px`;
-    }
-  });
+    let dragging = false, ox = 0, oy = 0;
 
-  btn.addEventListener("mousedown", e => {
-    if (e.button !== 0) return;
-    isDragging = true;
-    btn.style.cursor = "grabbing";
+    btn.addEventListener("mousedown", e => {
+      dragging = false;
+      ox = e.clientX - btn.offsetLeft;
+      oy = e.clientY - btn.offsetTop;
 
-    const rect = btn.getBoundingClientRect();
-    offsetX = e.clientX - rect.left;
-    offsetY = e.clientY - rect.top;
-    e.preventDefault();
-  });
+      const move = e2 => {
+        dragging = true;
+        btn.style.left = `${e2.clientX - ox}px`;
+        btn.style.top = `${e2.clientY - oy}px`;
+      };
 
-  document.addEventListener("mousemove", e => {
-    if (!isDragging) return;
-    btn.style.left = `${Math.max(0, e.clientX - offsetX)}px`;
-    btn.style.top = `${Math.max(0, e.clientY - offsetY)}px`;
-  });
+      const up = () => {
+        document.removeEventListener("mousemove", move);
+        document.removeEventListener("mouseup", up);
+      };
 
-  document.addEventListener("mouseup", () => {
-    if (!isDragging) return;
-    isDragging = false;
-    btn.style.cursor = "grab";
+      document.addEventListener("mousemove", move);
+      document.addEventListener("mouseup", up);
+    });
 
-    const rect = btn.getBoundingClientRect();
-    chrome.storage.local.set({
-      [STORAGE_KEY]: {
-        top: Math.round(rect.top),
-        left: Math.round(rect.left)
-      }
+    btn.addEventListener("click", () => {
+      if (!dragging) chrome.runtime.sendMessage({ type: "TASK_DONE" });
+    });
+
+    (document.body || document.documentElement)?.appendChild(btn);
+
+    /* ---------- Redirect Ribbon ---------- */
+
+    chrome.runtime.onMessage.addListener(msg => {
+      if (msg.type !== "SHOW_REDIRECT_NOTICE") return;
+      if (document.getElementById("queue-redirect")) return;
+
+      const r = document.createElement("div");
+      r.id = "queue-redirect";
+
+      Object.assign(r.style, {
+        position: "fixed",
+        top: "0",
+        left: "0",
+        width: "100%",
+        background: "#c97a1c",
+        color: "#fff",
+        padding: "10px 16px",
+        fontSize: "13px",
+        zIndex: "2147483646"
+      });
+
+      const text = document.createElement("div");
+      text.textContent =
+        "Notice: This page loaded at a different URL than the one you provided.";
+
+      const toggle = document.createElement("button");
+      toggle.textContent = "Show details";
+      Object.assign(toggle.style, {
+        background: "none",
+        border: "none",
+        color: "#fff",
+        textDecoration: "underline",
+        cursor: "pointer"
+      });
+
+      const details = document.createElement("div");
+      details.style.display = "none";
+      details.style.fontSize = "12px";
+      details.style.marginTop = "6px";
+      details.textContent = `Original: ${msg.original}\nFinal: ${msg.final}`;
+
+      toggle.onclick = () => {
+        const open = details.style.display === "block";
+        details.style.display = open ? "none" : "block";
+        toggle.textContent = open ? "Show details" : "Hide details";
+      };
+
+      r.append(text, toggle, details);
+      (document.body || document.documentElement)?.appendChild(r);
     });
   });
-
-  btn.addEventListener("click", () => {
-    if (!isDragging) {
-      chrome.runtime.sendMessage({ type: "TASK_DONE" });
-    }
-  });
-
-  document.documentElement.appendChild(btn);
 })();

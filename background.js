@@ -1,4 +1,4 @@
-const MAX_CONCURRENT = 2;
+let maxConcurrent = 2;
 const MAX_RETRIES = 2;
 
 let queue = [];
@@ -7,11 +7,7 @@ let activeTasks = {};
 let completedCount = 0;
 let failedCount = 0;
 let paused = false;
-let initialized = false;
 let scheduling = false;
-
-// prevents duplicate injections
-const injectedTabs = new Set();
 
 /* ---------- Persistence ---------- */
 
@@ -22,48 +18,20 @@ function persistState() {
     activeTasks,
     completedCount,
     failedCount,
-    paused
+    paused,
+    maxConcurrent
   });
 }
 
-/* ---------- Restore + Crash Recovery ---------- */
-
 async function restoreState() {
-  const data = await chrome.storage.local.get([
-    "queue",
-    "retryQueue",
-    "activeTasks",
-    "completedCount",
-    "failedCount",
-    "paused"
-  ]);
-
+  const data = await chrome.storage.local.get(null);
   queue = data.queue || [];
   retryQueue = data.retryQueue || [];
+  activeTasks = data.activeTasks || {};
   completedCount = data.completedCount || 0;
   failedCount = data.failedCount || 0;
   paused = data.paused || false;
-
-  const storedActive = data.activeTasks || {};
-  activeTasks = {};
-
-  const tabs = await chrome.tabs.query({ windowType: "normal" });
-  const liveTabIds = new Set(tabs.map(t => t.id));
-
-  for (const task of Object.values(storedActive)) {
-    if (task.tabId && liveTabIds.has(task.tabId)) {
-      activeTasks[task.id] = task;
-    } else {
-      if (task.startedAt) {
-        task.totalTimeMs += Date.now() - task.startedAt;
-        task.startedAt = null;
-      }
-      task.tabId = null;
-      handleFailure(task);
-    }
-  }
-
-  initialized = true;
+  maxConcurrent = Math.min(Math.max(data.maxConcurrent || 2, 1), 5);
   if (!paused) schedule();
 }
 
@@ -72,13 +40,12 @@ restoreState();
 /* ---------- Scheduler ---------- */
 
 async function schedule() {
-  if (!initialized || paused || scheduling) return;
-
+  if (paused || scheduling) return;
   scheduling = true;
   try {
     while (
-      Object.keys(activeTasks).length < MAX_CONCURRENT &&
-      (queue.length > 0 || retryQueue.length > 0)
+      Object.keys(activeTasks).length < maxConcurrent &&
+      (queue.length || retryQueue.length)
     ) {
       const task = queue.shift() || retryQueue.shift();
       await startTask(task);
@@ -92,57 +59,41 @@ async function schedule() {
 /* ---------- Task Lifecycle ---------- */
 
 async function startTask(task) {
-  const placeholder = `pending-${task.id}`;
-  activeTasks[placeholder] = task;
-
   try {
     const tab = await chrome.tabs.create({
       url: task.url,
       active: false
     });
-
-    delete activeTasks[placeholder];
     task.tabId = tab.id;
-    task.startedAt = Date.now();
+    task.redirectChecked = false;
     activeTasks[task.id] = task;
   } catch {
-    delete activeTasks[placeholder];
     handleFailure(task);
   }
 }
 
 function handleFailure(task) {
-  if (task.startedAt) {
-    task.totalTimeMs += Date.now() - task.startedAt;
-    task.startedAt = null;
-  }
-
   task.retries = (task.retries || 0) + 1;
-
-  if (task.retries <= MAX_RETRIES) {
-    retryQueue.push(task);
-  } else {
-    failedCount++;
-  }
+  if (task.retries <= MAX_RETRIES) retryQueue.push(task);
+  else failedCount++;
 }
 
 /* ---------- Completion ---------- */
 
 function completeTaskByTab(tabId) {
-  const task = Object.values(activeTasks).find(t => t.tabId === tabId);
-  if (!task) return;
+  const entry = Object.entries(activeTasks).find(
+    ([, t]) => t.tabId === tabId
+  );
+  if (!entry) return;
 
-  task.totalTimeMs += Date.now() - task.startedAt;
-  task.startedAt = null;
-
-  delete activeTasks[task.id];
-  injectedTabs.delete(tabId);
+  delete activeTasks[entry[0]];
   completedCount++;
-
   chrome.tabs.remove(tabId);
   persistState();
   schedule();
 }
+
+/* ---------- Messages ---------- */
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   switch (msg.type) {
@@ -151,81 +102,90 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       break;
 
     case "START_QUEUE":
-      if (Object.keys(activeTasks).length > 0) {
-        sendResponse({ error: "Tasks already running" });
-        return true;
-      }
-
       queue = msg.urls.map((url, i) => ({
         id: i + 1,
         url,
         retries: 0,
-        startedAt: null,
-        totalTimeMs: 0,
-        tabId: null
+        tabId: null,
+        redirectChecked: false
       }));
-
       retryQueue = [];
       activeTasks = {};
       completedCount = 0;
       failedCount = 0;
       paused = false;
-
       persistState();
       schedule();
-      sendResponse({ status: "started" });
+      break;
+
+    case "CLEAR_QUEUE":
+      queue = [];
+      retryQueue = [];
+      paused = true;
+      persistState();
+      break;
+
+    case "SET_CONCURRENCY":
+      maxConcurrent = Math.min(Math.max(msg.value, 1), 5);
+      persistState();
+      schedule();
       break;
 
     case "PAUSE":
       paused = true;
       persistState();
-      sendResponse({ status: "paused" });
       break;
 
     case "RESUME":
       paused = false;
       persistState();
       schedule();
-      sendResponse({ status: "resumed" });
       break;
 
     case "STATUS":
       sendResponse({
         pending: queue.length,
-        retrying: retryQueue.length,
-        active: Object.keys(activeTasks).filter(k => !k.startsWith("pending")).length,
+        active: Object.keys(activeTasks).length,
         completed: completedCount,
         failed: failedCount,
-        paused
+        paused,
+        maxConcurrent
       });
       break;
   }
   return true;
 });
 
-/* ---------- Keyboard Shortcut ---------- */
+/* ---------- Shortcut ---------- */
 
-chrome.commands.onCommand.addListener(command => {
-  if (command !== "mark-done") return;
-
+chrome.commands.onCommand.addListener(cmd => {
+  if (cmd !== "mark-done") return;
   chrome.tabs.query({ active: true, currentWindow: true }, tabs => {
     if (tabs[0]) completeTaskByTab(tabs[0].id);
   });
 });
 
-/* ---------- Inject Button ---------- */
+/* ---------- Redirect Check ---------- */
 
-chrome.tabs.onUpdated.addListener((tabId, info) => {
+chrome.tabs.onUpdated.addListener(async (tabId, info) => {
   if (info.status !== "complete") return;
-  if (injectedTabs.has(tabId)) return;
+  const task = Object.values(activeTasks).find(t => t.tabId === tabId);
+  if (!task || task.redirectChecked) return;
 
-  const isActive = Object.values(activeTasks).some(t => t.tabId === tabId);
-  if (!isActive) return;
-
-  injectedTabs.add(tabId);
-
-  chrome.scripting.executeScript({
+  task.redirectChecked = true;
+  await chrome.scripting.executeScript({
     target: { tabId },
     files: ["content.js"]
   });
+
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    if (tab.url && tab.url !== task.url) {
+      chrome.tabs.sendMessage(tabId, {
+        type: "SHOW_REDIRECT_NOTICE",
+        original: task.url,
+        final: tab.url
+      });
+    }
+  } catch {}
 });
