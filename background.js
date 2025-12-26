@@ -19,7 +19,7 @@ function persistState() {
     completedCount,
     failedCount,
     paused,
-    maxConcurrent
+    maxConcurrent,
   });
 }
 
@@ -62,7 +62,7 @@ async function startTask(task) {
   try {
     const tab = await chrome.tabs.create({
       url: task.url,
-      active: false
+      active: false,
     });
     task.tabId = tab.id;
     task.redirectChecked = false;
@@ -81,9 +81,7 @@ function handleFailure(task) {
 /* ---------- Completion ---------- */
 
 function completeTaskByTab(tabId) {
-  const entry = Object.entries(activeTasks).find(
-    ([, t]) => t.tabId === tabId
-  );
+  const entry = Object.entries(activeTasks).find(([, t]) => t.tabId === tabId);
   if (!entry) return;
 
   delete activeTasks[entry[0]];
@@ -107,7 +105,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         url,
         retries: 0,
         tabId: null,
-        redirectChecked: false
+        redirectChecked: false,
       }));
       retryQueue = [];
       activeTasks = {};
@@ -149,7 +147,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         completed: completedCount,
         failed: failedCount,
         paused,
-        maxConcurrent
+        maxConcurrent,
       });
       break;
   }
@@ -158,9 +156,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
 /* ---------- Shortcut ---------- */
 
-chrome.commands.onCommand.addListener(cmd => {
+chrome.commands.onCommand.addListener((cmd) => {
   if (cmd !== "mark-done") return;
-  chrome.tabs.query({ active: true, currentWindow: true }, tabs => {
+  chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
     if (tabs[0]) completeTaskByTab(tabs[0].id);
   });
 });
@@ -169,13 +167,13 @@ chrome.commands.onCommand.addListener(cmd => {
 
 chrome.tabs.onUpdated.addListener(async (tabId, info) => {
   if (info.status !== "complete") return;
-  const task = Object.values(activeTasks).find(t => t.tabId === tabId);
+  const task = Object.values(activeTasks).find((t) => t.tabId === tabId);
   if (!task || task.redirectChecked) return;
 
   task.redirectChecked = true;
   await chrome.scripting.executeScript({
     target: { tabId },
-    files: ["content.js"]
+    files: ["content.js"],
   });
 
   try {
@@ -184,7 +182,7 @@ chrome.tabs.onUpdated.addListener(async (tabId, info) => {
       chrome.tabs.sendMessage(tabId, {
         type: "SHOW_REDIRECT_NOTICE",
         original: task.url,
-        final: tab.url
+        final: tab.url,
       });
     }
   } catch {}

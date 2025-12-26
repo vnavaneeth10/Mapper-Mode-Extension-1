@@ -25,17 +25,19 @@
       fontSize: "13px",
       cursor: "grab",
       zIndex: "2147483647",
-      userSelect: "none"
+      userSelect: "none",
     });
 
-    let dragging = false, ox = 0, oy = 0;
+    let dragging = false,
+      ox = 0,
+      oy = 0;
 
-    btn.addEventListener("mousedown", e => {
+    btn.addEventListener("mousedown", (e) => {
       dragging = false;
       ox = e.clientX - btn.offsetLeft;
       oy = e.clientY - btn.offsetTop;
 
-      const move = e2 => {
+      const move = (e2) => {
         dragging = true;
         btn.style.left = `${e2.clientX - ox}px`;
         btn.style.top = `${e2.clientY - oy}px`;
@@ -58,7 +60,7 @@
 
     /* ---------- Redirect Ribbon ---------- */
 
-    chrome.runtime.onMessage.addListener(msg => {
+    chrome.runtime.onMessage.addListener((msg) => {
       if (msg.type !== "SHOW_REDIRECT_NOTICE") return;
       if (document.getElementById("queue-redirect")) return;
 
@@ -74,7 +76,7 @@
         color: "#fff",
         padding: "10px 16px",
         fontSize: "13px",
-        zIndex: "2147483646"
+        zIndex: "2147483646",
       });
 
       const text = document.createElement("div");
@@ -88,7 +90,7 @@
         border: "none",
         color: "#fff",
         textDecoration: "underline",
-        cursor: "pointer"
+        cursor: "pointer",
       });
 
       const details = document.createElement("div");

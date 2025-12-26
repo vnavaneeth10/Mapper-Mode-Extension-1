@@ -1,8 +1,8 @@
 document.addEventListener("DOMContentLoaded", () => {
-  const $ = id => document.getElementById(id);
+  const $ = (id) => document.getElementById(id);
 
   function refresh() {
-    chrome.runtime.sendMessage({ type: "STATUS" }, r => {
+    chrome.runtime.sendMessage({ type: "STATUS" }, (r) => {
       if (!r) return;
       $("status").textContent = r.paused ? "Paused" : "Running";
       $("active").textContent = r.active;
@@ -14,7 +14,10 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   $("start").onclick = () => {
-    const urls = $("urls").value.split("\n").map(u => u.trim()).filter(Boolean);
+    const urls = $("urls")
+      .value.split("\n")
+      .map((u) => u.trim())
+      .filter(Boolean);
     if (urls.length)
       chrome.runtime.sendMessage({ type: "START_QUEUE", urls }, refresh);
   };
@@ -33,7 +36,7 @@ document.addEventListener("DOMContentLoaded", () => {
   $("concurrency").onchange = () =>
     chrome.runtime.sendMessage({
       type: "SET_CONCURRENCY",
-      value: Number($("concurrency").value)
+      value: Number($("concurrency").value),
     });
 
   refresh();

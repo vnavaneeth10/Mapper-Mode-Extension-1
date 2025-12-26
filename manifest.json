@@ -3,8 +3,14 @@
   "name": "Controlled Queue Loader",
   "version": "1.2.0",
   "description": "Process large batches of URLs with controlled concurrency and manual completion.",
-  "permissions": ["tabs", "storage", "scripting"],
-  "host_permissions": ["<all_urls>"],
+  "permissions": [
+    "tabs",
+    "storage",
+    "scripting"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
   "background": {
     "service_worker": "background.js",
     "type": "module"
