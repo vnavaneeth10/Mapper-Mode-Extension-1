@@ -1,5 +1,5 @@
-let maxConcurrent = 2;
 const MAX_RETRIES = 2;
+let maxConcurrent = 2;
 
 let queue = [];
 let retryQueue = [];
@@ -7,9 +7,12 @@ let activeTasks = {};
 let completedCount = 0;
 let failedCount = 0;
 let paused = false;
-let scheduling = false;
 
-/* ---------- Persistence ---------- */
+let intentionalClose = new Set();
+let pendingCloseConfirm = null;
+let autoDoneOnClose = false;
+
+/* ------------------ Persistence ------------------ */
 
 function persistState() {
   chrome.storage.local.set({
@@ -20,6 +23,8 @@ function persistState() {
     failedCount,
     paused,
     maxConcurrent,
+    autoDoneOnClose,
+    pendingCloseConfirm
   });
 }
 
@@ -31,41 +36,39 @@ async function restoreState() {
   completedCount = data.completedCount || 0;
   failedCount = data.failedCount || 0;
   paused = data.paused || false;
-  maxConcurrent = Math.min(Math.max(data.maxConcurrent || 2, 1), 5);
+  maxConcurrent = data.maxConcurrent || 2;
+  autoDoneOnClose = data.autoDoneOnClose || false;
+  pendingCloseConfirm = data.pendingCloseConfirm || null;
+
   if (!paused) schedule();
 }
 
 restoreState();
 
-/* ---------- Scheduler ---------- */
+/* ------------------ Scheduler ------------------ */
 
 async function schedule() {
-  if (paused || scheduling) return;
-  scheduling = true;
-  try {
-    while (
-      Object.keys(activeTasks).length < maxConcurrent &&
-      (queue.length || retryQueue.length)
-    ) {
-      const task = queue.shift() || retryQueue.shift();
-      await startTask(task);
-    }
-  } finally {
-    scheduling = false;
-    persistState();
-  }
-}
+  if (paused) return;
 
-/* ---------- Task Lifecycle ---------- */
+  while (
+    Object.keys(activeTasks).length < maxConcurrent &&
+    (queue.length || retryQueue.length)
+  ) {
+    const task = queue.shift() || retryQueue.shift();
+    await startTask(task);
+  }
+
+  persistState();
+}
 
 async function startTask(task) {
   try {
     const tab = await chrome.tabs.create({
       url: task.url,
-      active: false,
+      active: false
     });
+
     task.tabId = tab.id;
-    task.redirectChecked = false;
     activeTasks[task.id] = task;
   } catch {
     handleFailure(task);
@@ -78,64 +81,103 @@ function handleFailure(task) {
   else failedCount++;
 }
 
-/* ---------- Completion ---------- */
+/* ------------------ Completion ------------------ */
 
-function completeTaskByTab(tabId) {
-  const entry = Object.entries(activeTasks).find(([, t]) => t.tabId === tabId);
-  if (!entry) return;
-
-  delete activeTasks[entry[0]];
+function completeTask(taskId, tabId) {
+  if (tabId) intentionalClose.add(tabId);
+  delete activeTasks[taskId];
   completedCount++;
-  chrome.tabs.remove(tabId);
+  paused = false;
   persistState();
   schedule();
 }
 
-/* ---------- Messages ---------- */
+/* ------------------ Tab Close Detection ------------------ */
+
+chrome.tabs.onRemoved.addListener(tabId => {
+  if (intentionalClose.has(tabId)) {
+    intentionalClose.delete(tabId);
+    return;
+  }
+
+  const entry = Object.entries(activeTasks).find(
+    ([, t]) => t.tabId === tabId
+  );
+  if (!entry) return;
+
+  const [taskId, task] = entry;
+
+  if (autoDoneOnClose) {
+    completeTask(taskId);
+    return;
+  }
+
+  paused = true;
+  pendingCloseConfirm = {
+    taskId,
+    url: task.url
+  };
+
+  persistState();
+});
+
+/* ------------------ Inline Confirmation Messaging ------------------ */
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   switch (msg.type) {
     case "TASK_DONE":
-      if (sender.tab?.id) completeTaskByTab(sender.tab.id);
+      if (sender.tab?.id) {
+        const entry = Object.entries(activeTasks).find(
+          ([, t]) => t.tabId === sender.tab.id
+        );
+        if (entry) completeTask(entry[0], sender.tab.id);
+      }
+      break;
+
+    case "CONFIRM_CLOSE_ACTION": {
+      const { action } = msg;
+      const pending = pendingCloseConfirm;
+      if (!pending) break;
+
+      if (action === "done") {
+        completeTask(pending.taskId);
+      }
+
+      if (action === "reopen") {
+        chrome.tabs.create({ url: pending.url });
+        paused = false;
+      }
+
+      if (action === "ignore") {
+        // keep paused
+      }
+
+      pendingCloseConfirm = null;
+      persistState();
+      break;
+    }
+
+    case "GET_PENDING_CONFIRM":
+      sendResponse(pendingCloseConfirm);
+      break;
+
+    case "SET_AUTO_DONE":
+      autoDoneOnClose = !!msg.value;
+      persistState();
       break;
 
     case "START_QUEUE":
       queue = msg.urls.map((url, i) => ({
         id: i + 1,
         url,
-        retries: 0,
-        tabId: null,
-        redirectChecked: false,
+        retries: 0
       }));
       retryQueue = [];
       activeTasks = {};
       completedCount = 0;
       failedCount = 0;
       paused = false;
-      persistState();
-      schedule();
-      break;
-
-    case "CLEAR_QUEUE":
-      queue = [];
-      retryQueue = [];
-      paused = true;
-      persistState();
-      break;
-
-    case "SET_CONCURRENCY":
-      maxConcurrent = Math.min(Math.max(msg.value, 1), 5);
-      persistState();
-      schedule();
-      break;
-
-    case "PAUSE":
-      paused = true;
-      persistState();
-      break;
-
-    case "RESUME":
-      paused = false;
+      pendingCloseConfirm = null;
       persistState();
       schedule();
       break;
@@ -148,42 +190,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         failed: failedCount,
         paused,
         maxConcurrent,
+        autoDoneOnClose
       });
       break;
   }
   return true;
-});
-
-/* ---------- Shortcut ---------- */
-
-chrome.commands.onCommand.addListener((cmd) => {
-  if (cmd !== "mark-done") return;
-  chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-    if (tabs[0]) completeTaskByTab(tabs[0].id);
-  });
-});
-
-/* ---------- Redirect Check ---------- */
-
-chrome.tabs.onUpdated.addListener(async (tabId, info) => {
-  if (info.status !== "complete") return;
-  const task = Object.values(activeTasks).find((t) => t.tabId === tabId);
-  if (!task || task.redirectChecked) return;
-
-  task.redirectChecked = true;
-  await chrome.scripting.executeScript({
-    target: { tabId },
-    files: ["content.js"],
-  });
-
-  try {
-    const tab = await chrome.tabs.get(tabId);
-    if (tab.url && tab.url !== task.url) {
-      chrome.tabs.sendMessage(tabId, {
-        type: "SHOW_REDIRECT_NOTICE",
-        original: task.url,
-        final: tab.url,
-      });
-    }
-  } catch {}
 });

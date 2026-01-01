@@ -1,48 +1,139 @@
 .popup-container {
-  padding: 12px;
-  width: 300px;
-  font-family: system-ui, sans-serif;
+  width: 380px;
+  padding: 14px;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  background: linear-gradient(135deg, #f8f9fa, #eef1f5);
+}
+
+.popup-section {
+  margin-bottom: 12px;
 }
 
 .popup-label {
-  font-size: 12px;
-  color: #444;
+  font-weight: 600;
+  display: block;
+  margin-bottom: 6px;
 }
 
 .popup-textarea {
   width: 100%;
-  height: 80px;
-  margin-bottom: 8px;
+  height: 100px;
+  resize: none;
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid #ccc;
+}
+
+.popup-input-number {
+  width: 80px;
+  padding: 6px;
+  border-radius: 6px;
+  border: 1px solid #ccc;
 }
 
 .popup-row {
   display: flex;
-  gap: 6px;
-  margin-bottom: 8px;
+  gap: 10px;
+  align-items: center;
 }
 
-.popup-input-number {
-  width: 60px;
-}
-
-.popup-button {
-  padding: 6px 10px;
-  font-size: 12px;
-  border-radius: 4px;
-  border: none;
+.popup-toggle-label {
+  display: flex;
+  gap: 8px;
+  font-weight: 500;
   cursor: pointer;
 }
 
+.popup-button {
+  flex: 1;
+  padding: 10px;
+  border-radius: 8px;
+  border: none;
+  cursor: pointer;
+  font-weight: 600;
+}
+
 .popup-button.primary {
-  background: #1a73e8;
+  background: #0b5ed7;
   color: #fff;
 }
 
-.popup-button.secondary {
-  background: #e0e0e0;
+.popup-button.danger {
+  background: #dc3545;
+  color: #fff;
+}
+
+.popup-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .popup-status {
+  margin-top: 10px;
+  padding: 10px;
+  background: #fff;
+  border-radius: 8px;
+  border: 1px solid #ddd;
   font-size: 12px;
-  line-height: 1.6;
+}
+
+/* ---------- Toast ---------- */
+
+.toast {
+  position: fixed;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%) translateY(10px);
+  background: #212529;
+  color: #fff;
+  padding: 12px 14px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 500;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s ease, transform 0.25s ease;
+  z-index: 9999;
+  min-width: 260px;
+  text-align: center;
+}
+
+.toast.show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+  pointer-events: auto;
+}
+
+.toast.success {
+  background: #198754;
+}
+
+.toast-actions {
+  margin-top: 8px;
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+}
+
+.toast-actions button {
+  border: none;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.toast-actions .confirm {
+  background: #dc3545;
+  color: #fff;
+}
+
+.toast-actions .cancel {
+  background: #adb5bd;
+  color: #111;
+}
+
+.hidden {
+  display: none;
 }
