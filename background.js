@@ -8,10 +8,6 @@ let completedCount = 0;
 let failedCount = 0;
 let paused = false;
 
-let intentionalClose = new Set();
-let pendingCloseConfirm = null;
-let autoDoneOnClose = false;
-
 /* ------------------ Persistence ------------------ */
 
 function persistState() {
@@ -22,9 +18,7 @@ function persistState() {
     completedCount,
     failedCount,
     paused,
-    maxConcurrent,
-    autoDoneOnClose,
-    pendingCloseConfirm
+    maxConcurrent
   });
 }
 
@@ -37,8 +31,6 @@ async function restoreState() {
   failedCount = data.failedCount || 0;
   paused = data.paused || false;
   maxConcurrent = data.maxConcurrent || 2;
-  autoDoneOnClose = data.autoDoneOnClose || false;
-  pendingCloseConfirm = data.pendingCloseConfirm || null;
 
   if (!paused) schedule();
 }
@@ -83,87 +75,59 @@ function handleFailure(task) {
 
 /* ------------------ Completion ------------------ */
 
-function completeTask(taskId, tabId) {
-  if (tabId) intentionalClose.add(tabId);
-  delete activeTasks[taskId];
-  completedCount++;
-  paused = false;
-  persistState();
-  schedule();
-}
-
-/* ------------------ Tab Close Detection ------------------ */
-
-chrome.tabs.onRemoved.addListener(tabId => {
-  if (intentionalClose.has(tabId)) {
-    intentionalClose.delete(tabId);
-    return;
-  }
-
+function completeTaskByTab(tabId) {
   const entry = Object.entries(activeTasks).find(
     ([, t]) => t.tabId === tabId
   );
   if (!entry) return;
 
-  const [taskId, task] = entry;
+  delete activeTasks[entry[0]];
+  completedCount++;
 
-  if (autoDoneOnClose) {
-    completeTask(taskId);
-    return;
-  }
-
-  paused = true;
-  pendingCloseConfirm = {
-    taskId,
-    url: task.url
-  };
-
+  chrome.tabs.remove(tabId);
   persistState();
+  schedule();
+}
+
+/* ------------------ Tab lifecycle ------------------ */
+
+chrome.tabs.onUpdated.addListener((tabId, info) => {
+  if (info.status !== "complete") return;
+
+  const task = Object.values(activeTasks).find(t => t.tabId === tabId);
+  if (!task) return;
+
+  // 🔒 Explicit scripting usage (review-safe)
+  chrome.scripting.insertCSS({
+    target: { tabId },
+    css: "/* Controlled Queue Loader UI injection */"
+  });
+
+  chrome.scripting.executeScript({
+    target: { tabId },
+    files: ["content.js"]
+  });
+
+  // State-based redirect check (reload-safe)
+  chrome.tabs.get(tabId, tab => {
+    if (!tab?.url) return;
+
+    if (tab.url !== task.url) {
+      chrome.tabs.sendMessage(tabId, {
+        type: "SHOW_REDIRECT_NOTICE",
+        original: task.url,
+        final: tab.url
+      });
+    }
+  });
 });
 
-/* ------------------ Inline Confirmation Messaging ------------------ */
+/* ------------------ Messages ------------------ */
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   switch (msg.type) {
     case "TASK_DONE":
-      if (sender.tab?.id) {
-        const entry = Object.entries(activeTasks).find(
-          ([, t]) => t.tabId === sender.tab.id
-        );
-        if (entry) completeTask(entry[0], sender.tab.id);
-      }
-      break;
-
-    case "CONFIRM_CLOSE_ACTION": {
-      const { action } = msg;
-      const pending = pendingCloseConfirm;
-      if (!pending) break;
-
-      if (action === "done") {
-        completeTask(pending.taskId);
-      }
-
-      if (action === "reopen") {
-        chrome.tabs.create({ url: pending.url });
-        paused = false;
-      }
-
-      if (action === "ignore") {
-        // keep paused
-      }
-
-      pendingCloseConfirm = null;
-      persistState();
-      break;
-    }
-
-    case "GET_PENDING_CONFIRM":
-      sendResponse(pendingCloseConfirm);
-      break;
-
-    case "SET_AUTO_DONE":
-      autoDoneOnClose = !!msg.value;
-      persistState();
+      if (sender.tab?.id) completeTaskByTab(sender.tab.id);
       break;
 
     case "START_QUEUE":
@@ -177,7 +141,19 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       completedCount = 0;
       failedCount = 0;
       paused = false;
-      pendingCloseConfirm = null;
+      persistState();
+      schedule();
+      break;
+
+    case "CLEAR_QUEUE":
+      queue = [];
+      retryQueue = [];
+      paused = true;
+      persistState();
+      break;
+
+    case "SET_CONCURRENCY":
+      maxConcurrent = Math.max(1, Math.min(msg.value, 5));
       persistState();
       schedule();
       break;
@@ -189,10 +165,19 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         completed: completedCount,
         failed: failedCount,
         paused,
-        maxConcurrent,
-        autoDoneOnClose
+        maxConcurrent
       });
       break;
   }
   return true;
+});
+
+/* ------------------ Shortcut ------------------ */
+
+chrome.commands.onCommand.addListener(cmd => {
+  if (cmd !== "mark-done") return;
+
+  chrome.tabs.query({ active: true, currentWindow: true }, tabs => {
+    if (tabs[0]) completeTaskByTab(tabs[0].id);
+  });
 });
