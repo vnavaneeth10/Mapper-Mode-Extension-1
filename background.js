@@ -1,12 +1,17 @@
 const MAX_RETRIES = 2;
-let maxConcurrent = 2;
+const MAX_CONCURRENCY_CAP = 4;
 
+let maxConcurrent = 2;
 let queue = [];
 let retryQueue = [];
 let activeTasks = {};
 let completedCount = 0;
 let failedCount = 0;
 let paused = false;
+
+/* ------------------ Redirect store (Pattern A) ------------------ */
+
+const redirectInfoByTab = {};
 
 /* ------------------ Persistence ------------------ */
 
@@ -24,13 +29,14 @@ function persistState() {
 
 async function restoreState() {
   const data = await chrome.storage.local.get(null);
+
   queue = data.queue || [];
   retryQueue = data.retryQueue || [];
   activeTasks = data.activeTasks || {};
   completedCount = data.completedCount || 0;
   failedCount = data.failedCount || 0;
   paused = data.paused || false;
-  maxConcurrent = data.maxConcurrent || 2;
+  maxConcurrent = Math.min(MAX_CONCURRENCY_CAP, data.maxConcurrent || 2);
 
   if (!paused) schedule();
 }
@@ -75,7 +81,7 @@ function handleFailure(task) {
 
 /* ------------------ Completion ------------------ */
 
-function completeTaskByTab(tabId) {
+function completeTaskByTabId(tabId) {
   const entry = Object.entries(activeTasks).find(
     ([, t]) => t.tabId === tabId
   );
@@ -84,6 +90,7 @@ function completeTaskByTab(tabId) {
   delete activeTasks[entry[0]];
   completedCount++;
 
+  delete redirectInfoByTab[tabId];
   chrome.tabs.remove(tabId);
   persistState();
   schedule();
@@ -97,27 +104,19 @@ chrome.tabs.onUpdated.addListener((tabId, info) => {
   const task = Object.values(activeTasks).find(t => t.tabId === tabId);
   if (!task) return;
 
-  // 🔒 Explicit scripting usage (review-safe)
-  chrome.scripting.insertCSS({
-    target: { tabId },
-    css: "/* Controlled Queue Loader UI injection */"
-  });
-
   chrome.scripting.executeScript({
     target: { tabId },
     files: ["content.js"]
   });
 
-  // State-based redirect check (reload-safe)
   chrome.tabs.get(tabId, tab => {
     if (!tab?.url) return;
 
     if (tab.url !== task.url) {
-      chrome.tabs.sendMessage(tabId, {
-        type: "SHOW_REDIRECT_NOTICE",
+      redirectInfoByTab[tabId] = {
         original: task.url,
         final: tab.url
-      });
+      };
     }
   });
 });
@@ -127,7 +126,9 @@ chrome.tabs.onUpdated.addListener((tabId, info) => {
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   switch (msg.type) {
     case "TASK_DONE":
-      if (sender.tab?.id) completeTaskByTab(sender.tab.id);
+      if (sender.tab?.id) {
+        completeTaskByTabId(sender.tab.id);
+      }
       break;
 
     case "START_QUEUE":
@@ -148,12 +149,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     case "CLEAR_QUEUE":
       queue = [];
       retryQueue = [];
+      activeTasks = {};
+      completedCount = 0;
+      failedCount = 0;
       paused = true;
       persistState();
       break;
 
     case "SET_CONCURRENCY":
-      maxConcurrent = Math.max(1, Math.min(msg.value, 5));
+      maxConcurrent = Math.max(
+        1,
+        Math.min(MAX_CONCURRENCY_CAP, msg.value)
+      );
       persistState();
       schedule();
       break;
@@ -168,16 +175,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         maxConcurrent
       });
       break;
+
+    case "GET_REDIRECT_INFO":
+      if (sender.tab?.id && redirectInfoByTab[sender.tab.id]) {
+        sendResponse(redirectInfoByTab[sender.tab.id]);
+      } else {
+        sendResponse(null);
+      }
+      break;
   }
-  return true;
-});
-
-/* ------------------ Shortcut ------------------ */
-
-chrome.commands.onCommand.addListener(cmd => {
-  if (cmd !== "mark-done") return;
-
-  chrome.tabs.query({ active: true, currentWindow: true }, tabs => {
-    if (tabs[0]) completeTaskByTab(tabs[0].id);
-  });
 });

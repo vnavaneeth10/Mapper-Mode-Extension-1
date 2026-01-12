@@ -5,40 +5,55 @@
 </head>
 <body class="popup-container">
 
+  <!-- Header -->
+  <div class="popup-header">
+    <div class="popup-title">Controlled Queue Loader</div>
+    <div class="popup-subtitle">Process URLs with controlled concurrency</div>
+  </div>
+
+  <!-- URLs Input -->
   <div class="popup-section">
     <label class="popup-label">URLs (one per line)</label>
-    <textarea id="urls" class="popup-textarea"></textarea>
+    <textarea
+      id="urls"
+      class="popup-textarea"
+      placeholder="https://example.com/page-1
+https://example.com/page-2"
+    ></textarea>
   </div>
 
+  <!-- Settings -->
   <div class="popup-section popup-row">
-    <label class="popup-label">Max concurrent tabs</label>
-    <input
-      id="concurrency"
-      type="number"
-      min="1"
-      max="6"
-      class="popup-input-number"
-    />
-  </div>
+    <div class="popup-field">
+      <label class="popup-label">Max concurrent tabs</label>
+      <input
+        id="concurrency"
+        type="number"
+        min="1"
+        max="6"
+        class="popup-input-number"
+      />
+    </div>
 
-  <div class="popup-section popup-row toggle-row">
-    <label class="popup-toggle-label">
+    <label class="popup-toggle">
       <input type="checkbox" id="autoDone" />
-      Always mark done on close
+      <span>Always mark done on close</span>
     </label>
   </div>
 
-  <div class="popup-section popup-row">
+  <!-- Actions -->
+  <div class="popup-section popup-actions">
     <button id="start" class="popup-button primary">Start</button>
     <button id="clear" class="popup-button danger">Clear queue</button>
   </div>
 
-  <div class="popup-status">
-    Status: <span id="status"></span><br>
-    Active: <span id="active"></span><br>
-    Pending: <span id="pending"></span><br>
-    Completed: <span id="completed"></span><br>
-    Failed: <span id="failed"></span>
+  <!-- Status Summary -->
+  <div class="popup-section popup-status">
+    <div><span>Status</span><strong id="status"></strong></div>
+    <div><span>Active</span><strong id="active"></strong></div>
+    <div><span>Pending</span><strong id="pending"></strong></div>
+    <div><span>Completed</span><strong id="completed"></strong></div>
+    <div><span>Failed</span><strong id="failed"></strong></div>
   </div>
 
   <!-- Toast -->

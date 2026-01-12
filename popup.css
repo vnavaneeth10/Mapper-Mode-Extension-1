@@ -1,80 +1,158 @@
-.popup-container {
+/* ---------- Base ---------- */
+
+body.popup-container {
   width: 380px;
+  margin: 0;
   padding: 14px;
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
-  background: linear-gradient(135deg, #f8f9fa, #eef1f5);
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: #ffffff;
+  color: #212529;
 }
+
+/* ---------- Header ---------- */
+
+.popup-header {
+  margin-bottom: 14px;
+}
+
+.popup-title {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.popup-subtitle {
+  font-size: 12px;
+  color: #6c757d;
+  margin-top: 2px;
+}
+
+/* ---------- Sections ---------- */
 
 .popup-section {
-  margin-bottom: 12px;
-}
-
-.popup-label {
-  font-weight: 600;
-  display: block;
-  margin-bottom: 6px;
-}
-
-.popup-textarea {
-  width: 100%;
-  height: 100px;
-  resize: none;
-  padding: 10px;
-  border-radius: 8px;
-  border: 1px solid #ccc;
-}
-
-.popup-input-number {
-  width: 80px;
-  padding: 6px;
-  border-radius: 6px;
-  border: 1px solid #ccc;
+  margin-bottom: 14px;
 }
 
 .popup-row {
   display: flex;
-  gap: 10px;
+  gap: 12px;
   align-items: center;
 }
 
-.popup-toggle-label {
+.popup-field {
+  flex: 1;
+}
+
+/* ---------- Labels ---------- */
+
+.popup-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 4px;
+  color: #495057;
+}
+
+/* ---------- Inputs ---------- */
+
+.popup-textarea {
+  width: 100%;
+  height: 110px;
+  resize: vertical;
+  padding: 8px;
+  font-size: 13px;
+  border-radius: 6px;
+  border: 1px solid #ced4da;
+  font-family: monospace;
+}
+
+.popup-textarea:focus {
+  outline: none;
+  border-color: #0d6efd;
+}
+
+.popup-input-number {
+  width: 100%;
+  padding: 6px;
+  font-size: 13px;
+  border-radius: 6px;
+  border: 1px solid #ced4da;
+}
+
+/* ---------- Toggle ---------- */
+
+.popup-toggle {
   display: flex;
-  gap: 8px;
-  font-weight: 500;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #495057;
   cursor: pointer;
+}
+
+.popup-toggle input {
+  cursor: pointer;
+}
+
+/* ---------- Actions ---------- */
+
+.popup-actions {
+  display: flex;
+  gap: 10px;
 }
 
 .popup-button {
   flex: 1;
-  padding: 10px;
-  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: 6px;
   border: none;
   cursor: pointer;
-  font-weight: 600;
+  transition: background 0.15s ease, transform 0.1s ease;
+}
+
+.popup-button:active {
+  transform: scale(0.97);
 }
 
 .popup-button.primary {
-  background: #0b5ed7;
+  background: #0d6efd;
   color: #fff;
+}
+
+.popup-button.primary:hover {
+  background: #0b5ed7;
 }
 
 .popup-button.danger {
-  background: #dc3545;
-  color: #fff;
+  background: #f1f3f5;
+  color: #842029;
 }
 
-.popup-button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+.popup-button.danger:hover {
+  background: #e9ecef;
 }
+
+/* ---------- Status ---------- */
 
 .popup-status {
-  margin-top: 10px;
-  padding: 10px;
-  background: #fff;
-  border-radius: 8px;
-  border: 1px solid #ddd;
-  font-size: 12px;
+  font-size: 13px;
+  border-top: 1px solid #dee2e6;
+  padding-top: 10px;
+}
+
+.popup-status div {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.popup-status span {
+  color: #6c757d;
+}
+
+.popup-status strong {
+  font-weight: 700;
 }
 
 /* ---------- Toast ---------- */
@@ -82,46 +160,34 @@
 .toast {
   position: fixed;
   bottom: 12px;
-  left: 50%;
-  transform: translateX(-50%) translateY(10px);
+  left: 12px;
+  right: 12px;
   background: #212529;
   color: #fff;
-  padding: 12px 14px;
-  border-radius: 10px;
-  font-size: 12px;
-  font-weight: 500;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.25s ease, transform 0.25s ease;
+  padding: 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
   z-index: 9999;
-  min-width: 260px;
-  text-align: center;
 }
 
-.toast.show {
-  opacity: 1;
-  transform: translateX(-50%) translateY(0);
-  pointer-events: auto;
+.toast.hidden {
+  display: none;
 }
 
 .toast.success {
   background: #198754;
 }
 
-.toast-actions {
-  margin-top: 8px;
-  display: flex;
-  justify-content: center;
-  gap: 8px;
-}
-
 .toast-actions button {
+  margin-left: 6px;
+  padding: 4px 8px;
+  border-radius: 4px;
   border: none;
-  padding: 6px 10px;
-  border-radius: 6px;
   font-size: 12px;
   cursor: pointer;
-  font-weight: 600;
 }
 
 .toast-actions .confirm {
@@ -130,10 +196,6 @@
 }
 
 .toast-actions .cancel {
-  background: #adb5bd;
-  color: #111;
-}
-
-.hidden {
-  display: none;
+  background: #6c757d;
+  color: #fff;
 }

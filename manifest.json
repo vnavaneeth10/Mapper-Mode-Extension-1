@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Controlled Queue Loader",
-  "version": "1.3.1",
-  "description": "Process large batches of URLs with controlled concurrency and manual completion.",
+  "version": "1.3.2",
+  "description": "Open URLs in a controlled queue, mark pages as done manually, and automatically load the next page.",
   "permissions": ["tabs", "storage", "scripting"],
   "host_permissions": ["<all_urls>"],
   "background": {

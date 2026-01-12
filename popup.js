@@ -6,66 +6,11 @@ const els = {
   failed: document.getElementById("failed"),
   urls: document.getElementById("urls"),
   concurrency: document.getElementById("concurrency"),
-  autoDone: document.getElementById("autoDone"),
   start: document.getElementById("start"),
   clear: document.getElementById("clear")
 };
 
-const toast = document.getElementById("toast");
-
-/* ---------- Toast helpers ---------- */
-
-function closeToastImmediately() {
-  toast.className = "toast hidden";
-  toast.innerHTML = "";
-}
-
-function showConfirmToast() {
-  toast.className = "toast show";
-  toast.innerHTML = `
-    Clear all pending tasks?
-    <div class="toast-actions">
-      <button id="toast-clear" class="confirm">Clear</button>
-      <button id="toast-cancel" class="cancel">Cancel</button>
-    </div>
-  `;
-
-  document.getElementById("toast-cancel").onclick = () => {
-    closeToastImmediately();
-  };
-
-  document.getElementById("toast-clear").onclick = () => {
-    // 🔒 Close UI FIRST
-    closeToastImmediately();
-
-    // Then perform action
-    chrome.runtime.sendMessage({ type: "CLEAR_QUEUE" }, () => {
-      showSuccessToast();
-      refresh();
-    });
-  };
-}
-
-function showSuccessToast() {
-  toast.className = "toast show success";
-  toast.textContent = "Queue cleared";
-
-  setTimeout(() => {
-    closeToastImmediately();
-  }, 1800);
-}
-
-/* ---------- Restore settings ---------- */
-
-chrome.storage.local.get(
-  ["maxConcurrent", "autoDoneOnClose"],
-  res => {
-    els.concurrency.value = res.maxConcurrent || 2;
-    els.autoDone.checked = !!res.autoDoneOnClose;
-  }
-);
-
-/* ---------- Status ---------- */
+/* ------------------ Status refresh ------------------ */
 
 function refresh() {
   chrome.runtime.sendMessage({ type: "STATUS" }, r => {
@@ -76,16 +21,13 @@ function refresh() {
     els.active.textContent = r.active;
     els.pending.textContent = r.pending;
     els.failed.textContent = r.failed;
-
     els.concurrency.value = r.maxConcurrent;
-    els.autoDone.checked = r.autoDoneOnClose;
 
-    // Disable Clear when nothing to clear
-    els.clear.disabled = !(r.pending > 0 || r.active > 0);
+    els.clear.disabled = r.pending === 0 && r.active === 0;
   });
 }
 
-/* ---------- Actions ---------- */
+/* ------------------ Actions ------------------ */
 
 els.start.onclick = () => {
   const urls = els.urls.value
@@ -95,27 +37,24 @@ els.start.onclick = () => {
 
   if (!urls.length) return;
 
-  chrome.runtime.sendMessage({ type: "START_QUEUE", urls }, refresh);
+  // 🔒 fire-and-forget (NO callback)
+  chrome.runtime.sendMessage({ type: "START_QUEUE", urls });
 };
 
 els.clear.onclick = () => {
-  if (els.clear.disabled) return;
-  showConfirmToast();
+  // 🔒 fire-and-forget (NO callback)
+  chrome.runtime.sendMessage({ type: "CLEAR_QUEUE" });
 };
 
 els.concurrency.onchange = () => {
-  const value = Math.max(1, Math.min(6, Number(els.concurrency.value)));
-  chrome.runtime.sendMessage({ type: "SET_CONCURRENCY", value });
-};
-
-els.autoDone.onchange = () => {
+  const value = Math.max(1, Math.min(4, Number(els.concurrency.value)));
   chrome.runtime.sendMessage({
-    type: "SET_AUTO_DONE",
-    value: els.autoDone.checked
+    type: "SET_CONCURRENCY",
+    value
   });
 };
 
-/* ---------- Init ---------- */
+/* ------------------ Init ------------------ */
 
 refresh();
 setInterval(refresh, 1000);
