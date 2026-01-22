@@ -9,11 +9,16 @@ let completedCount = 0;
 let failedCount = 0;
 let paused = false;
 
-/* ------------------ Redirect store (Pattern A) ------------------ */
+/* =====================================================
+   Redirect Observer Engine (NEW – Step 3.1)
+===================================================== */
 
 const redirectInfoByTab = {};
+const redirectObservers = {}; // tabId -> { lastUrl, timer }
 
-/* ------------------ Persistence ------------------ */
+/* =====================================================
+   Persistence
+===================================================== */
 
 function persistState() {
   chrome.storage.local.set({
@@ -43,7 +48,9 @@ async function restoreState() {
 
 restoreState();
 
-/* ------------------ Scheduler ------------------ */
+/* =====================================================
+   Scheduler
+===================================================== */
 
 async function schedule() {
   if (paused) return;
@@ -68,6 +75,10 @@ async function startTask(task) {
 
     task.tabId = tab.id;
     activeTasks[task.id] = task;
+
+    // Initialize redirect observer
+    startRedirectObserver(tab.id, task.url);
+
   } catch {
     handleFailure(task);
   }
@@ -79,7 +90,55 @@ function handleFailure(task) {
   else failedCount++;
 }
 
-/* ------------------ Completion ------------------ */
+/* =====================================================
+   Redirect Observer Logic (CORE)
+===================================================== */
+
+function startRedirectObserver(tabId, originalUrl) {
+  redirectObservers[tabId] = {
+    original: originalUrl,
+    lastUrl: originalUrl,
+    timer: null
+  };
+}
+
+function scheduleRedirectFinalize(tabId) {
+  const observer = redirectObservers[tabId];
+  if (!observer) return;
+
+  clearTimeout(observer.timer);
+
+  observer.timer = setTimeout(() => {
+    redirectInfoByTab[tabId] = {
+      original: observer.original,
+      final: observer.lastUrl
+    };
+  }, 2500); // final stabilization window
+}
+
+chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
+  if (!redirectObservers[tabId]) return;
+  if (!tab?.url) return;
+
+  const observer = redirectObservers[tabId];
+
+  if (tab.url !== observer.lastUrl) {
+    observer.lastUrl = tab.url;
+    scheduleRedirectFinalize(tabId);
+  }
+
+  // Inject content.js once page loads
+  if (info.status === "complete") {
+    chrome.scripting.executeScript({
+      target: { tabId },
+      files: ["content.js"]
+    });
+  }
+});
+
+/* =====================================================
+   Completion
+===================================================== */
 
 function completeTaskByTabId(tabId) {
   const entry = Object.entries(activeTasks).find(
@@ -91,44 +150,21 @@ function completeTaskByTabId(tabId) {
   completedCount++;
 
   delete redirectInfoByTab[tabId];
+  delete redirectObservers[tabId];
+
   chrome.tabs.remove(tabId);
   persistState();
   schedule();
 }
 
-/* ------------------ Tab lifecycle ------------------ */
-
-chrome.tabs.onUpdated.addListener((tabId, info) => {
-  if (info.status !== "complete") return;
-
-  const task = Object.values(activeTasks).find(t => t.tabId === tabId);
-  if (!task) return;
-
-  chrome.scripting.executeScript({
-    target: { tabId },
-    files: ["content.js"]
-  });
-
-  chrome.tabs.get(tabId, tab => {
-    if (!tab?.url) return;
-
-    if (tab.url !== task.url) {
-      redirectInfoByTab[tabId] = {
-        original: task.url,
-        final: tab.url
-      };
-    }
-  });
-});
-
-/* ------------------ Messages ------------------ */
+/* =====================================================
+   Messages
+===================================================== */
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   switch (msg.type) {
     case "TASK_DONE":
-      if (sender.tab?.id) {
-        completeTaskByTabId(sender.tab.id);
-      }
+      if (sender.tab?.id) completeTaskByTabId(sender.tab.id);
       break;
 
     case "START_QUEUE":

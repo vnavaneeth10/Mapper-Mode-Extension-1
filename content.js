@@ -1,236 +1,221 @@
 (() => {
-  /* =====================================================
-     CONSTANTS
-  ===================================================== */
+  if (window.__CQL_RIBBON__) return;
+  window.__CQL_RIBBON__ = true;
 
+  const AUTO_COLLAPSE_MS = 3000;
   const LOAD_DELAY = 400;
-  const BLANK_DELAY = 1200;
-  const AUTO_COLLAPSE_MS = 6000;
+  const SLOW_LOAD_MS = 3000;
+  const STORAGE_KEY = "cql-markdone-pos";
+  const INVALID_PATTERNS = ["/sb0/", "/sb1/", "/redir_sku/", "/bnd/", "/brand/", "/cat/"];
 
-  const WAYFAIR_INVALID_PATTERNS = [
-    "/sb0/",
-    "/sb1/",
-    "/redir_sku/",
-    "/bnd/",
-    "/brand/",
-    "/cat/"
-  ];
+  const el = id => document.getElementById(id);
 
-  /* =====================================================
-     HELPERS
-  ===================================================== */
+  let loadStart = performance.now();
+  let redirectHistory = [];
+  let finalUrlObserved = location.href;
 
-  function el(id) {
-    return document.getElementById(id);
-  }
+  /* ---------------- helpers ---------------- */
 
-  function remove(id) {
-    el(id)?.remove();
-  }
-
-  function pageLooksBlank() {
-    return (
-      document.body &&
-      document.body.innerText.trim().length === 0 &&
-      document.images.length === 0
-    );
-  }
-
-  function isWayfair(url) {
-    try {
-      return new URL(url).hostname.includes("wayfair.");
-    } catch {
-      return false;
-    }
+  function extractSKU(url) {
+    const m = url.match(/-([a-zA-Z0-9]+)\.html/);
+    return m ? m[1] : null;
   }
 
   function extractPIID(url) {
     try {
-      return new URL(url).searchParams.get("piid");
+      const v = new URL(url).searchParams.get("piid");
+      return v ? v.split("%2C").sort().join(",") : null;
     } catch {
       return null;
     }
   }
 
-  function extractSlug(url) {
-    const match = url.match(/\/pdp\/.*?\/(.*?)(?:\.html|$)/);
-    return match ? match[1] : null;
+  function isReload() {
+    const nav = performance.getEntriesByType("navigation")[0];
+    return nav?.type === "reload";
   }
 
-  function isInvalidWayfairURL(finalUrl) {
-    return (
-      !finalUrl.endsWith(".html") ||
-      WAYFAIR_INVALID_PATTERNS.some(p => finalUrl.includes(p))
-    );
+  function looksInvalid(url) {
+    if (!url.endsWith(".html") && !url.includes(".html?")) return true;
+    return INVALID_PATTERNS.some(p => url.includes(p));
   }
 
-  function copyText(text, indicatorEl) {
-    navigator.clipboard.writeText(text).then(() => {
-      indicatorEl.textContent = "✓ Copied";
-      setTimeout(() => (indicatorEl.textContent = "Copy"), 1200);
-    });
+  function copy(text, btn) {
+    navigator.clipboard.writeText(text);
+    btn.textContent = "✓ Copied";
+    setTimeout(() => (btn.textContent = "Copy"), 1200);
   }
 
-  /* =====================================================
-     LOADING UI (unchanged)
-  ===================================================== */
+  function confidenceScore({ urlMatch, skuMatch, piidMatch, valid }) {
+    let score = 0;
+    if (urlMatch) score += 25;
+    if (skuMatch) score += 25;
+    if (piidMatch) score += 25;
+    if (valid) score += 25;
+    return score;
+  }
 
-  let loadingShown = false;
-  let centerShown = false;
+  function scoreColor(score) {
+    if (score >= 85) return "#198754";
+    if (score >= 60) return "#ffc107";
+    return "#dc3545";
+  }
 
-  function showTopLoadingRibbon() {
-    if (loadingShown || el("queue-redirect-ribbon")) return;
-    loadingShown = true;
+  /* ---------------- loading indicator ---------------- */
 
-    const r = document.createElement("div");
-    r.id = "queue-loading-ribbon";
-
-    Object.assign(r.style, {
+  let loadingRibbon;
+  setTimeout(() => {
+    if (el("cql-ribbon")) return;
+    loadingRibbon = document.createElement("div");
+    loadingRibbon.id = "cql-loading";
+    Object.assign(loadingRibbon.style, {
       position: "fixed",
       top: "0",
       left: "0",
       width: "100%",
-      padding: "14px 16px",
+      padding: "14px",
       background: "#e0f2fe",
       color: "#075985",
-      fontSize: "16px",
-      fontWeight: "600",
-      zIndex: "2147483644",
-      borderBottom: "1px solid #bae6fd"
+      fontWeight: "700",
+      zIndex: 2147483646,
+      borderBottom: "1px solid #bae6fd",
+      textAlign: "center"
     });
+    loadingRibbon.textContent = "⏳ Loading page…";
+    document.documentElement.appendChild(loadingRibbon);
+  }, LOAD_DELAY);
 
-    r.textContent = "⏳ Loading page… please wait";
-    document.documentElement.appendChild(r);
+  function clearLoading() {
+    loadingRibbon?.remove();
   }
 
-  function showCenterOverlay() {
-    if (centerShown || el("queue-redirect-ribbon")) return;
-    centerShown = true;
+  window.addEventListener("load", () => setTimeout(clearLoading, 300));
 
-    const o = document.createElement("div");
-    o.id = "queue-loading-center";
-
-    Object.assign(o.style, {
-      position: "fixed",
-      top: "50%",
-      left: "50%",
-      transform: "translate(-50%, -50%)",
-      padding: "18px 26px",
-      fontSize: "16px",
-      fontWeight: "600",
-      background: "#f8fafc",
-      color: "#0f172a",
-      borderRadius: "12px",
-      zIndex: "2147483645",
-      boxShadow: "0 10px 28px rgba(0,0,0,0.18)",
-      pointerEvents: "none"
-    });
-
-    o.textContent = "Loading content…";
-    document.documentElement.appendChild(o);
-  }
-
-  function clearLoadingUI() {
-    remove("queue-loading-ribbon");
-    remove("queue-loading-center");
-  }
-
-  setTimeout(showTopLoadingRibbon, LOAD_DELAY);
-  setTimeout(() => {
-    if (pageLooksBlank()) showCenterOverlay();
-  }, BLANK_DELAY);
-
-  window.addEventListener("load", () => {
-    setTimeout(clearLoadingUI, 600);
-  });
-
-  /* =====================================================
-     MARK DONE – RESPONSIVE (from Phase 3.1)
-  ===================================================== */
+  /* ---------------- MARK DONE (persisted) ---------------- */
 
   if (!el("queue-mark-done")) {
     const btn = document.createElement("button");
     btn.id = "queue-mark-done";
     btn.textContent = "✔️ Mark Done";
 
-    let clicked = false;
-
     Object.assign(btn.style, {
       position: "fixed",
       top: "180px",
       left: "16px",
       padding: "8px 14px",
-      background: "#2f2f2f",
+      background: "#212529",
       color: "#fff",
       border: "none",
       borderRadius: "6px",
-      cursor: "pointer",
-      zIndex: "2147483647",
-      fontWeight: "600"
+      fontWeight: "600",
+      cursor: "grab",
+      zIndex: 2147483647
     });
 
-    btn.onclick = () => {
-      if (clicked) return;
-      clicked = true;
+    chrome.storage.local.get(STORAGE_KEY, res => {
+      if (res[STORAGE_KEY]) {
+        btn.style.top = res[STORAGE_KEY].top + "px";
+        btn.style.left = res[STORAGE_KEY].left + "px";
+      }
+    });
 
-      btn.textContent = "⏳ Closing tab…";
-      btn.style.background = "#2fb344";
-      btn.style.opacity = "0.9";
+    let drag = false, ox = 0, oy = 0;
 
-      chrome.runtime.sendMessage({ type: "TASK_DONE" });
+    btn.onmousedown = e => {
+      drag = false;
+      const r = btn.getBoundingClientRect();
+      ox = e.clientX - r.left;
+      oy = e.clientY - r.top;
+
+      const move = ev => {
+        drag = true;
+        btn.style.left = ev.clientX - ox + "px";
+        btn.style.top = ev.clientY - oy + "px";
+      };
+
+      const up = () => {
+        document.removeEventListener("mousemove", move);
+        document.removeEventListener("mouseup", up);
+
+        if (drag) {
+          chrome.storage.local.set({
+            [STORAGE_KEY]: {
+              top: btn.getBoundingClientRect().top,
+              left: btn.getBoundingClientRect().left
+            }
+          });
+        } else {
+          btn.textContent = "⏳ Closing…";
+          btn.style.background = "#2fb344";
+          chrome.runtime.sendMessage({ type: "TASK_DONE" });
+        }
+      };
+
+      document.addEventListener("mousemove", move);
+      document.addEventListener("mouseup", up);
     };
 
     document.documentElement.appendChild(btn);
   }
 
-  /* =====================================================
-     WAYFAIR STATUS RESOLUTION (unchanged logic)
-  ===================================================== */
+  /* ---------------- redirect observer ---------------- */
 
-  function evaluateWayfair(original, final) {
-    if (!isWayfair(final)) {
-      return { icon: "ℹ️", text: "No redirection detected", bg: "#e7f1ff", fg: "#084298" };
+  const observer = new MutationObserver(() => {
+    if (location.href !== finalUrlObserved) {
+      finalUrlObserved = location.href;
+      redirectHistory.push(finalUrlObserved);
+    }
+  });
+
+  observer.observe(document, { subtree: true, childList: true });
+
+  /* ---------------- RIBBON ---------------- */
+
+  function renderRibbon(original, final, status) {
+    clearLoading();
+    if (el("cql-ribbon")) return;
+
+    const skuO = extractSKU(original);
+    const skuF = extractSKU(final);
+    const piidO = extractPIID(original);
+    const piidF = extractPIID(final);
+
+    const invalid = looksInvalid(final);
+    const reloaded = isReload();
+    const slowLoad = performance.now() - loadStart > SLOW_LOAD_MS;
+    const multiRedirect = redirectHistory.length > 1;
+
+    const urlMatch = original === final;
+    const skuMatch = skuO === skuF;
+    const piidMatch = piidO === piidF;
+    const valid = !invalid;
+
+    const confidence = confidenceScore({ urlMatch, skuMatch, piidMatch, valid });
+
+    let bg = "#e7f1ff";
+    let statusText = "NO REDIRECTION";
+    let reason = "Final URL matches original input";
+
+    if (!urlMatch) {
+      bg = "#fff3cd";
+      statusText = "REDIRECTED";
+      reason = "Final URL differs from original";
     }
 
-    if (isInvalidWayfairURL(final)) {
-      return { icon: "⛔", text: "UNKNOWN : URL IS INVALID", bg: "#f8d7da", fg: "#842029" };
+    if (invalid) {
+      bg = "#f8d7da";
+      statusText = "UNKNOWN : URL IS INVALID";
+      reason = "Invalid URL pattern detected";
     }
 
-    const po = extractPIID(original);
-    const pf = extractPIID(final);
-
-    if (
-      pf === "null" ||
-      (po && !pf) ||
-      (!po && pf) ||
-      (po && pf && po !== pf)
-    ) {
-      return { icon: "🧩", text: "UNKNOWN : VARIATION NOT SELECTED", bg: "#e2d9f3", fg: "#4b2e83" };
+    if (!piidMatch) {
+      bg = "#e2d9f3";
+      statusText = "UNKNOWN : VARIATION NOT SELECTED";
+      reason = "PIID mismatch between original and final URL";
     }
-
-    const so = extractSlug(original);
-    const sf = extractSlug(final);
-
-    if (so && sf && so !== sf) {
-      return { icon: "🔁", text: "SKU REDIRECTED", bg: "#fff3cd", fg: "#664d03" };
-    }
-
-    return { icon: "✅", text: "NO REDIRECTION DETECTED", bg: "#e7f1ff", fg: "#084298" };
-  }
-
-  /* =====================================================
-     REDIRECT RIBBON – PHASE 3.2
-  ===================================================== */
-
-  function renderRedirectRibbon(original, final) {
-    clearLoadingUI();
-    if (el("queue-redirect-ribbon")) return;
-
-    const status = evaluateWayfair(original, final);
-    const domain = new URL(final).hostname;
 
     const ribbon = document.createElement("div");
-    ribbon.id = "queue-redirect-ribbon";
+    ribbon.id = "cql-ribbon";
 
     Object.assign(ribbon.style, {
       position: "fixed",
@@ -238,83 +223,83 @@
       left: "0",
       width: "100%",
       padding: "12px 16px",
-      background: status.bg,
-      color: status.fg,
-      borderBottom: "1px solid rgba(0,0,0,0.1)",
-      zIndex: "2147483646",
+      background: bg,
+      zIndex: 2147483646,
       fontSize: "13px",
-      boxSizing: "border-box"
+      borderBottom: "1px solid rgba(0,0,0,0.15)"
     });
 
     ribbon.innerHTML = `
-      <div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px">
-        <div style="display:flex;align-items:center;gap:8px;font-weight:700">
-          <span>${status.icon}</span>
-          <span>${status.text}</span>
-        </div>
-        <div style="display:flex;gap:10px;font-size:12px">
-          <span id="qr-dismiss" style="cursor:pointer;text-decoration:underline">Dismiss for this task</span>
-          <span id="qr-close" style="cursor:pointer;font-weight:700">✕</span>
-        </div>
+      <div style="display:flex;justify-content:space-between;font-weight:700">
+        <div>🔁 Page processed</div>
+        <div>${status || ""}</div>
       </div>
 
-      <div style="margin-top:4px;font-size:12px;opacity:.85">
-        Domain: ${domain}
+      <div style="margin-top:4px;font-size:12px">
+        Domain: <strong>${location.hostname}</strong>
       </div>
 
-      <button id="qr-toggle"
-        style="margin-top:6px;border:none;background:none;color:#0d6efd;
-               cursor:pointer;font-size:12px;padding:0">
-        Hide details
-      </button>
+      <div style="margin-top:4px;display:flex;gap:6px;flex-wrap:wrap">
+        ${reloaded ? `<span style="background:#ffeeba;padding:2px 6px;border-radius:6px">RELOADED</span>` : ""}
+        ${slowLoad ? `<span style="background:#cff4fc;padding:2px 6px;border-radius:6px">SLOW LOAD</span>` : ""}
+        ${multiRedirect ? `<span style="background:#fff3cd;padding:2px 6px;border-radius:6px">MULTI REDIRECT</span>` : ""}
+        <span style="background:#dee2e6;padding:2px 6px;border-radius:6px">BETA</span>
+      </div>
 
-      <div id="qr-details"
-           style="margin-top:6px;font-size:12px;word-break:break-all">
-        <div><strong>${status.icon} Status</strong></div>
-        <div style="margin-bottom:6px">${status.text}</div>
+      <div style="margin-top:8px;font-weight:700">${statusText}</div>
+      <div style="font-size:12px;opacity:.8">${reason}</div>
 
-        <div><strong>Original URL</strong></div>
-        <div>${original}</div>
-        <button id="copy-original" style="margin-top:2px;font-size:11px">Copy</button>
+      <div style="margin-top:8px;display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <div><strong>SKU</strong><br>O: ${skuO || "-"}<br>F: ${skuF || "-"}</div>
+        <div><strong>PIID</strong><br>O: ${piidO || "-"}<br>F: ${piidF || "-"}</div>
+      </div>
 
-        <div style="margin-top:6px"><strong>Final URL</strong></div>
-        <div>${final}</div>
-        <button id="copy-final" style="margin-top:2px;font-size:11px">Copy</button>
+      <div style="margin-top:6px;font-size:12px">
+        Confidence: <strong style="color:${scoreColor(confidence)}">${confidence}%</strong>
+      </div>
+
+      <button id="toggle" style="margin-top:8px;border:none;background:none;color:#0d6efd;cursor:pointer">Hide details</button>
+
+      <div id="details" style="margin-top:6px;font-size:12px">
+        <div><strong>Original URL</strong><br>${original}<br><button id="co">Copy</button></div>
+        <div style="margin-top:6px"><strong>Final URL</strong><br>${final}<br><button id="cf">Copy</button></div>
+      </div>
+
+      <div style="margin-top:8px;font-size:11px;opacity:.7">
+        ⚠️ This extension is under active development. Manual verification is recommended.
+      </div>
+
+      <div style="text-align:right;margin-top:6px">
+        <span id="dismiss" style="cursor:pointer;text-decoration:underline">Dismiss</span>
+        &nbsp;&nbsp;
+        <span id="close" style="cursor:pointer;font-weight:700">✕</span>
       </div>
     `;
 
     document.documentElement.appendChild(ribbon);
 
-    let expanded = true;
-
-    el("qr-toggle").onclick = () => {
-      expanded = !expanded;
-      el("qr-details").style.display = expanded ? "block" : "none";
-      el("qr-toggle").textContent = expanded ? "Hide details" : "Show details";
+    let open = true;
+    el("toggle").onclick = () => {
+      open = !open;
+      el("details").style.display = open ? "block" : "none";
+      el("toggle").textContent = open ? "Hide details" : "Show details";
     };
 
     setTimeout(() => {
-      if (expanded) {
-        expanded = false;
-        el("qr-details").style.display = "none";
-        el("qr-toggle").textContent = "Show details";
+      if (open) {
+        open = false;
+        el("details").style.display = "none";
+        el("toggle").textContent = "Show details";
       }
     }, AUTO_COLLAPSE_MS);
 
-    el("qr-close").onclick = () => ribbon.remove();
-    el("qr-dismiss").onclick = () => ribbon.remove();
-
-    el("copy-original").onclick = e => copyText(original, e.target);
-    el("copy-final").onclick = e => copyText(final, e.target);
+    el("co").onclick = e => copy(original, e.target);
+    el("cf").onclick = e => copy(final, e.target);
+    el("close").onclick = () => ribbon.remove();
+    el("dismiss").onclick = () => ribbon.remove();
   }
 
-  /* =====================================================
-     PULL REDIRECT INFO (Pattern A)
-  ===================================================== */
-
   chrome.runtime.sendMessage({ type: "GET_REDIRECT_INFO" }, info => {
-    if (info) {
-      renderRedirectRibbon(info.original, info.final);
-    }
+    renderRibbon(info?.original || location.href, info?.final || location.href, info?.progress);
   });
 })();
