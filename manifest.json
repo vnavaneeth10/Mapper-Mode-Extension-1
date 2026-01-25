@@ -2,9 +2,15 @@
   "manifest_version": 3,
   "name": "Controlled Queue Loader",
   "version": "1.7.0",
-  "description": "Process large sets of user-provided URLs in a controlled queue. Open only a limited number of pages at a time, manually mark pages as done, and automatically load the next task with visual status indicators.",
-  "permissions": ["tabs", "storage", "scripting"],
-  "host_permissions": ["<all_urls>"],
+  "description": "Open URLs in a controlled queue, mark pages as done manually, and load the next task with clear visual status indicators.",
+  "permissions": [
+    "tabs",
+    "storage",
+    "scripting"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
   "background": {
     "service_worker": "background.js",
     "type": "module"
