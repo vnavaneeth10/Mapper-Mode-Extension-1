@@ -29,6 +29,7 @@ This project focuses on clarity, reliability, and real-world usability. Contribu
 ## Reporting issues
 
 If you find a bug or have a suggestion:
+
 - Open an issue with clear reproduction steps
 - Explain expected behavior vs actual behavior
 

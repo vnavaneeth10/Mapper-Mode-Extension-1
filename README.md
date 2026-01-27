@@ -33,6 +33,7 @@ Controlled Queue Loader solves these problems by **controlling how URLs are open
 6. The next URL loads automatically
 
 You always know:
+
 - What is active
 - What is pending
 - What is completed
@@ -42,26 +43,31 @@ You always know:
 ## Key features
 
 ### Controlled tab concurrency
+
 - Limits how many tabs open at the same time
 - Prevents browser slowdown and tab overload
 - User configurable (up to 6 tabs)
 
 ### Mark Done workflow
+
 - Each task is explicitly marked as completed
 - Prevents skipped or forgotten pages
 - Automatically advances the queue
 
 ### Clear Queue (safe & confirmed)
+
 - Clears pending tasks with confirmation
 - Prevents accidental data loss
 - Disabled automatically when there’s nothing to clear
 
 ### Automatic safety handling
+
 - Handles accidental tab closures gracefully
 - Optional setting to automatically mark tasks as done on close
 - Prevents the queue from getting stuck
 
 ### Clear progress summary
+
 - Displays:
   - Active tasks
   - Pending tasks
@@ -96,6 +102,7 @@ No technical knowledge is required to use the extension.
 ## Design philosophy
 
 This extension is intentionally:
+
 - Simple
 - Explicit
 - User-driven

@@ -1,6 +1,9 @@
 (() => {
   // Prevent multiple injections
-  if (document.getElementById('cql-ribbon') || document.getElementById('queue-mark-done')) {
+  if (
+    document.getElementById("cql-ribbon") ||
+    document.getElementById("queue-mark-done")
+  ) {
     return;
   }
 
@@ -9,9 +12,16 @@
   const SLOW_LOAD_MS = 3000;
   const LOADING_MAX_TIMEOUT = 30000; // 30 seconds max for loading indicator
   const STORAGE_KEY = "cql-markdone-pos";
-  const INVALID_PATTERNS = ["/sb0/", "/sb1/", "/redir_sku/", "/bnd/", "/brand/", "/cat/"];
+  const INVALID_PATTERNS = [
+    "/sb0/",
+    "/sb1/",
+    "/redir_sku/",
+    "/bnd/",
+    "/brand/",
+    "/cat/",
+  ];
 
-  const el = id => document.getElementById(id);
+  const el = (id) => document.getElementById(id);
 
   let loadStart = performance.now();
   let redirectHistory = [location.href];
@@ -20,7 +30,7 @@
   /* ---------------- helpers ---------------- */
 
   function escapeHtml(str) {
-    const div = document.createElement('div');
+    const div = document.createElement("div");
     div.textContent = str;
     return div.innerHTML;
   }
@@ -46,7 +56,7 @@
 
   function looksInvalid(url) {
     if (!url.endsWith(".html") && !url.includes(".html?")) return true;
-    return INVALID_PATTERNS.some(p => url.includes(p));
+    return INVALID_PATTERNS.some((p) => url.includes(p));
   }
 
   function copy(text, btn) {
@@ -57,21 +67,21 @@
 
   function confidenceScore({ urlMatch, skuMatch, piidMatch, valid }) {
     let score = 0;
-    
+
     // Invalid URL = 0 confidence
     if (!valid) return 0;
-    
+
     score += 30; // Base for valid URL
-    
+
     // SKU match is critical for product pages
     if (skuMatch) score += 35;
-    
+
     // PIID match confirms variant
     if (piidMatch) score += 25;
-    
+
     // URL match is less important (canonical redirects are valid)
     if (urlMatch) score += 10;
-    
+
     return Math.min(100, score);
   }
 
@@ -86,10 +96,10 @@
   let loadingRibbon;
   let loadingTimeout;
   let loadingMaxTimeout;
-  
+
   loadingTimeout = setTimeout(() => {
     if (el("cql-ribbon")) return;
-    
+
     loadingRibbon = document.createElement("div");
     loadingRibbon.id = "cql-loading";
     Object.assign(loadingRibbon.style, {
@@ -103,11 +113,11 @@
       fontWeight: "700",
       zIndex: "2147483646",
       borderBottom: "1px solid #bae6fd",
-      textAlign: "center"
+      textAlign: "center",
     });
     loadingRibbon.textContent = "⏳ Loading page…";
     document.documentElement.appendChild(loadingRibbon);
-    
+
     // Safety: remove after max timeout
     loadingMaxTimeout = setTimeout(() => {
       clearLoading();
@@ -140,29 +150,37 @@
       borderRadius: "6px",
       fontWeight: "600",
       cursor: "grab",
-      zIndex: "2147483647"
+      zIndex: "2147483647",
     });
 
-    chrome.storage.local.get(STORAGE_KEY, res => {
+    chrome.storage.local.get(STORAGE_KEY, (res) => {
       if (res[STORAGE_KEY]) {
         btn.style.top = res[STORAGE_KEY].top + "px";
         btn.style.left = res[STORAGE_KEY].left + "px";
       }
     });
 
-    let drag = false, ox = 0, oy = 0;
+    let drag = false,
+      ox = 0,
+      oy = 0;
 
-    btn.onmousedown = e => {
+    btn.onmousedown = (e) => {
       drag = false;
       const r = btn.getBoundingClientRect();
       ox = e.clientX - r.left;
       oy = e.clientY - r.top;
 
-      const move = ev => {
+      const move = (ev) => {
         drag = true;
         // Bound the button within viewport
-        const newLeft = Math.max(0, Math.min(window.innerWidth - btn.offsetWidth, ev.clientX - ox));
-        const newTop = Math.max(0, Math.min(window.innerHeight - btn.offsetHeight, ev.clientY - oy));
+        const newLeft = Math.max(
+          0,
+          Math.min(window.innerWidth - btn.offsetWidth, ev.clientX - ox),
+        );
+        const newTop = Math.max(
+          0,
+          Math.min(window.innerHeight - btn.offsetHeight, ev.clientY - oy),
+        );
         btn.style.left = newLeft + "px";
         btn.style.top = newTop + "px";
       };
@@ -175,8 +193,8 @@
           chrome.storage.local.set({
             [STORAGE_KEY]: {
               top: btn.getBoundingClientRect().top,
-              left: btn.getBoundingClientRect().left
-            }
+              left: btn.getBoundingClientRect().left,
+            },
           });
         } else {
           btn.textContent = "⏳ Closing…";
@@ -195,9 +213,9 @@
   /* ---------------- redirect observer - FIXED with History API ---------------- */
 
   // Modern approach for SPA navigation
-  ['pushState', 'replaceState'].forEach(method => {
+  ["pushState", "replaceState"].forEach((method) => {
     const original = history[method];
-    history[method] = function(...args) {
+    history[method] = function (...args) {
       const result = original.apply(this, args);
       if (location.href !== finalUrlObserved) {
         finalUrlObserved = location.href;
@@ -208,14 +226,14 @@
   });
 
   // Catch hashchange and popstate
-  window.addEventListener('hashchange', () => {
+  window.addEventListener("hashchange", () => {
     if (location.href !== finalUrlObserved) {
       finalUrlObserved = location.href;
       redirectHistory.push(finalUrlObserved);
     }
   });
 
-  window.addEventListener('popstate', () => {
+  window.addEventListener("popstate", () => {
     if (location.href !== finalUrlObserved) {
       finalUrlObserved = location.href;
       redirectHistory.push(finalUrlObserved);
@@ -243,7 +261,12 @@
     const piidMatch = piidO === piidF;
     const valid = !invalid;
 
-    const confidence = confidenceScore({ urlMatch, skuMatch, piidMatch, valid });
+    const confidence = confidenceScore({
+      urlMatch,
+      skuMatch,
+      piidMatch,
+      valid,
+    });
 
     let bg = "#e7f1ff";
     let statusText = "NO REDIRECTION";
@@ -279,7 +302,7 @@
       background: bg,
       zIndex: "2147483646",
       fontSize: "13px",
-      borderBottom: "1px solid rgba(0,0,0,0.15)"
+      borderBottom: "1px solid rgba(0,0,0,0.15)",
     });
 
     // Using escapeHtml to prevent XSS
@@ -347,20 +370,24 @@
       }
     }, AUTO_COLLAPSE_MS);
 
-    el("co").onclick = e => copy(original, e.target);
-    el("cf").onclick = e => copy(final, e.target);
+    el("co").onclick = (e) => copy(original, e.target);
+    el("cf").onclick = (e) => copy(final, e.target);
     el("close").onclick = () => ribbon.remove();
     el("dismiss").onclick = () => ribbon.remove();
   }
 
   // Request redirect info with error handling
-  chrome.runtime.sendMessage({ type: "GET_REDIRECT_INFO" }, info => {
+  chrome.runtime.sendMessage({ type: "GET_REDIRECT_INFO" }, (info) => {
     if (chrome.runtime.lastError) {
-      console.warn('Extension context invalidated:', chrome.runtime.lastError);
+      console.warn("Extension context invalidated:", chrome.runtime.lastError);
       // Fallback: render with current URL
       renderRibbon(location.href, location.href, null);
       return;
     }
-    renderRibbon(info?.original || location.href, info?.final || location.href, info?.progress);
+    renderRibbon(
+      info?.original || location.href,
+      info?.final || location.href,
+      info?.progress,
+    );
   });
 })();

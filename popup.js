@@ -8,7 +8,7 @@ const els = {
   concurrency: document.getElementById("concurrency"),
   start: document.getElementById("start"),
   clear: document.getElementById("clear"),
-  toast: document.getElementById("toast")
+  toast: document.getElementById("toast"),
 };
 
 let refreshInterval;
@@ -18,7 +18,7 @@ let refreshInterval;
 function showToast(message, type = "info") {
   els.toast.textContent = message;
   els.toast.className = `toast ${type}`;
-  
+
   setTimeout(() => {
     els.toast.className = "toast hidden";
   }, 3000);
@@ -27,12 +27,12 @@ function showToast(message, type = "info") {
 /* ------------------ Status refresh ------------------ */
 
 function refresh() {
-  chrome.runtime.sendMessage({ type: "STATUS" }, r => {
+  chrome.runtime.sendMessage({ type: "STATUS" }, (r) => {
     if (chrome.runtime.lastError) {
-      console.error('Failed to get status:', chrome.runtime.lastError);
+      console.error("Failed to get status:", chrome.runtime.lastError);
       return;
     }
-    
+
     if (!r) return;
 
     els.status.textContent = r.paused ? "Paused" : "Running";
@@ -40,7 +40,7 @@ function refresh() {
     els.active.textContent = r.active;
     els.pending.textContent = r.pending;
     els.failed.textContent = r.failed;
-    
+
     // Only update concurrency if user is not currently editing it
     if (document.activeElement !== els.concurrency) {
       els.concurrency.value = r.maxConcurrent;
@@ -62,7 +62,7 @@ function stopRefreshing() {
 }
 
 // Only refresh when popup is visible
-document.addEventListener('visibilitychange', () => {
+document.addEventListener("visibilitychange", () => {
   if (document.hidden) {
     stopRefreshing();
   } else {
@@ -75,7 +75,7 @@ document.addEventListener('visibilitychange', () => {
 els.start.onclick = () => {
   const urls = els.urls.value
     .split("\n")
-    .map(u => u.trim())
+    .map((u) => u.trim())
     .filter(Boolean);
 
   if (!urls.length) {
@@ -87,9 +87,12 @@ els.start.onclick = () => {
   els.start.disabled = true;
   els.start.textContent = "Starting...";
 
-  chrome.runtime.sendMessage({ type: "START_QUEUE", urls }, response => {
+  chrome.runtime.sendMessage({ type: "START_QUEUE", urls }, (response) => {
     if (chrome.runtime.lastError) {
-      showToast("Failed to start queue: " + chrome.runtime.lastError.message, "error");
+      showToast(
+        "Failed to start queue: " + chrome.runtime.lastError.message,
+        "error",
+      );
       els.start.disabled = false;
       els.start.textContent = "Start";
       return;
@@ -116,9 +119,12 @@ els.clear.onclick = () => {
   els.clear.disabled = true;
   els.clear.textContent = "Clearing...";
 
-  chrome.runtime.sendMessage({ type: "CLEAR_QUEUE" }, response => {
+  chrome.runtime.sendMessage({ type: "CLEAR_QUEUE" }, (response) => {
     if (chrome.runtime.lastError) {
-      showToast("Failed to clear queue: " + chrome.runtime.lastError.message, "error");
+      showToast(
+        "Failed to clear queue: " + chrome.runtime.lastError.message,
+        "error",
+      );
       els.clear.disabled = false;
       els.clear.textContent = "Clear queue";
       return;
@@ -143,26 +149,29 @@ let concurrencyTimeout;
 
 els.concurrency.onchange = () => {
   const value = Math.max(1, Math.min(4, Number(els.concurrency.value)));
-  
+
   // Clear any pending timeout
   clearTimeout(concurrencyTimeout);
-  
+
   // Debounce to avoid conflicts with refresh
   concurrencyTimeout = setTimeout(() => {
-    chrome.runtime.sendMessage({
-      type: "SET_CONCURRENCY",
-      value
-    }, response => {
-      if (chrome.runtime.lastError) {
-        showToast("Failed to update concurrency", "error");
-        return;
-      }
-      
-      if (response && response.success) {
-        showToast(`Concurrency set to ${response.maxConcurrent}`, "success");
-        refresh();
-      }
-    });
+    chrome.runtime.sendMessage(
+      {
+        type: "SET_CONCURRENCY",
+        value,
+      },
+      (response) => {
+        if (chrome.runtime.lastError) {
+          showToast("Failed to update concurrency", "error");
+          return;
+        }
+
+        if (response && response.success) {
+          showToast(`Concurrency set to ${response.maxConcurrent}`, "success");
+          refresh();
+        }
+      },
+    );
   }, 300); // 300ms debounce
 };
 

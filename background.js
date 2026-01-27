@@ -30,7 +30,7 @@ function persistState() {
     failedCount,
     paused,
     maxConcurrent,
-    taskIdCounter
+    taskIdCounter,
   });
 }
 
@@ -73,7 +73,7 @@ async function startTask(task) {
   try {
     const tab = await chrome.tabs.create({
       url: task.url,
-      active: false
+      active: false,
     });
 
     task.tabId = tab.id;
@@ -81,7 +81,6 @@ async function startTask(task) {
 
     // Initialize redirect observer
     startRedirectObserver(tab.id, task.url);
-
   } catch (err) {
     console.error(`Failed to create tab for task ${task.id}:`, err);
     handleFailure(task);
@@ -107,7 +106,7 @@ function startRedirectObserver(tabId, originalUrl) {
   redirectObservers[tabId] = {
     original: originalUrl,
     lastUrl: originalUrl,
-    timer: null
+    timer: null,
   };
 }
 
@@ -120,7 +119,7 @@ function scheduleRedirectFinalize(tabId) {
   observer.timer = setTimeout(() => {
     redirectInfoByTab[tabId] = {
       original: observer.original,
-      final: observer.lastUrl
+      final: observer.lastUrl,
     };
   }, 2500); // final stabilization window
 }
@@ -138,15 +137,20 @@ chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
 
   // Inject content.js once page loads
   if (info.status === "complete") {
-    chrome.scripting.executeScript({
-      target: { tabId },
-      files: ["content.js"]
-    }).catch(err => {
-      // Silently fail on restricted pages (chrome://, about:, etc.)
-      if (!err.message.includes("Cannot access")) {
-        console.error(`Failed to inject content script in tab ${tabId}:`, err);
-      }
-    });
+    chrome.scripting
+      .executeScript({
+        target: { tabId },
+        files: ["content.js"],
+      })
+      .catch((err) => {
+        // Silently fail on restricted pages (chrome://, about:, etc.)
+        if (!err.message.includes("Cannot access")) {
+          console.error(
+            `Failed to inject content script in tab ${tabId}:`,
+            err,
+          );
+        }
+      });
   }
 });
 
@@ -161,12 +165,10 @@ chrome.tabs.onRemoved.addListener((tabId) => {
     delete redirectObservers[tabId];
   }
   delete redirectInfoByTab[tabId];
-  
+
   // Handle task failure if tab was closed externally
-  const entry = Object.entries(activeTasks).find(
-    ([, t]) => t.tabId === tabId
-  );
-  
+  const entry = Object.entries(activeTasks).find(([, t]) => t.tabId === tabId);
+
   if (entry) {
     console.warn(`Tab ${tabId} closed externally, marking task as failed`);
     const task = activeTasks[entry[0]];
@@ -180,16 +182,14 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 ===================================================== */
 
 function completeTaskByTabId(tabId) {
-  const entry = Object.entries(activeTasks).find(
-    ([, t]) => t.tabId === tabId
-  );
+  const entry = Object.entries(activeTasks).find(([, t]) => t.tabId === tabId);
   if (!entry) return;
 
   delete activeTasks[entry[0]];
   completedCount++;
 
   delete redirectInfoByTab[tabId];
-  
+
   // Clean up observer
   if (redirectObservers[tabId]) {
     clearTimeout(redirectObservers[tabId].timer);
@@ -197,10 +197,10 @@ function completeTaskByTabId(tabId) {
   }
 
   // Close tab with error handling
-  chrome.tabs.remove(tabId).catch(err => {
+  chrome.tabs.remove(tabId).catch((err) => {
     console.warn(`Tab ${tabId} already closed or removed:`, err);
   });
-  
+
   persistState();
   schedule();
 }
@@ -217,11 +217,11 @@ function createTask(url) {
     console.warn(`Invalid URL skipped: ${url}`);
     return null;
   }
-  
+
   return {
     id: taskIdCounter++,
     url,
-    retries: 0
+    retries: 0,
   };
 }
 
@@ -231,23 +231,23 @@ function createTask(url) {
 
 async function cleanupAllActiveTasks() {
   const tabIds = Object.values(activeTasks)
-    .map(t => t.tabId)
+    .map((t) => t.tabId)
     .filter(Boolean);
-  
+
   if (tabIds.length > 0) {
     try {
       await chrome.tabs.remove(tabIds);
     } catch (err) {
-      console.warn('Some tabs could not be removed:', err);
+      console.warn("Some tabs could not be removed:", err);
     }
   }
-  
+
   // Clear all observers
-  Object.keys(redirectObservers).forEach(tabId => {
+  Object.keys(redirectObservers).forEach((tabId) => {
     clearTimeout(redirectObservers[tabId]?.timer);
     delete redirectObservers[tabId];
   });
-  
+
   activeTasks = {};
   redirectInfoByTab = {};
 }
@@ -267,29 +267,27 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         try {
           // Clean up existing tasks first
           await cleanupAllActiveTasks();
-          
+
           // Filter and create valid tasks
-          const tasks = msg.urls
-            .map(url => createTask(url))
-            .filter(Boolean);
-          
+          const tasks = msg.urls.map((url) => createTask(url)).filter(Boolean);
+
           if (tasks.length === 0) {
             sendResponse({ success: false, error: "No valid URLs provided" });
             return;
           }
-          
+
           queue = tasks;
           retryQueue = [];
           completedCount = 0;
           failedCount = 0;
           paused = false;
-          
+
           persistState();
           schedule();
-          
+
           sendResponse({ success: true, queued: tasks.length });
         } catch (err) {
-          console.error('START_QUEUE error:', err);
+          console.error("START_QUEUE error:", err);
           sendResponse({ success: false, error: err.message });
         }
       })();
@@ -299,28 +297,25 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       (async () => {
         try {
           await cleanupAllActiveTasks();
-          
+
           queue = [];
           retryQueue = [];
           completedCount = 0;
           failedCount = 0;
           paused = true;
-          
+
           persistState();
-          
+
           sendResponse({ success: true });
         } catch (err) {
-          console.error('CLEAR_QUEUE error:', err);
+          console.error("CLEAR_QUEUE error:", err);
           sendResponse({ success: false, error: err.message });
         }
       })();
       return true; // Async response
 
     case "SET_CONCURRENCY":
-      maxConcurrent = Math.max(
-        1,
-        Math.min(MAX_CONCURRENCY_CAP, msg.value)
-      );
+      maxConcurrent = Math.max(1, Math.min(MAX_CONCURRENCY_CAP, msg.value));
       persistState();
       schedule();
       sendResponse({ success: true, maxConcurrent });
@@ -333,7 +328,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         completed: completedCount,
         failed: failedCount,
         paused,
-        maxConcurrent
+        maxConcurrent,
       });
       return true; // Keep channel open
 
@@ -345,6 +340,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       }
       return true; // Keep channel open
   }
-  
+
   return false; // Close channel for unhandled messages
 });

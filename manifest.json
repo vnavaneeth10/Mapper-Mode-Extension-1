@@ -4,8 +4,14 @@
   "version": "1.8.0",
   "description": "Open URLs in a controlled queue, mark pages as done manually, and load the next task with clear visual status indicators.",
   "minimum_chrome_version": "114",
-  "permissions": ["tabs", "storage", "scripting"],
-  "host_permissions": ["<all_urls>"],
+  "permissions": [
+    "tabs",
+    "storage",
+    "scripting"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
   "background": {
     "service_worker": "background.js",
     "type": "module"
