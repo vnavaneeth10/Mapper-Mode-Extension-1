@@ -8,13 +8,14 @@ let activeTasks = {};
 let completedCount = 0;
 let failedCount = 0;
 let paused = false;
+let taskIdCounter = Date.now(); // Unique task IDs
 
 /* =====================================================
-   Redirect Observer Engine (NEW – Step 3.1)
+   Redirect Observer Engine
 ===================================================== */
 
-const redirectInfoByTab = {};
-const redirectObservers = {}; // tabId -> { lastUrl, timer }
+let redirectInfoByTab = {};
+let redirectObservers = {}; // tabId -> { lastUrl, timer }
 
 /* =====================================================
    Persistence
@@ -28,7 +29,8 @@ function persistState() {
     completedCount,
     failedCount,
     paused,
-    maxConcurrent
+    maxConcurrent,
+    taskIdCounter
   });
 }
 
@@ -42,6 +44,7 @@ async function restoreState() {
   failedCount = data.failedCount || 0;
   paused = data.paused || false;
   maxConcurrent = Math.min(MAX_CONCURRENCY_CAP, data.maxConcurrent || 2);
+  taskIdCounter = data.taskIdCounter || Date.now();
 
   if (!paused) schedule();
 }
@@ -79,19 +82,25 @@ async function startTask(task) {
     // Initialize redirect observer
     startRedirectObserver(tab.id, task.url);
 
-  } catch {
+  } catch (err) {
+    console.error(`Failed to create tab for task ${task.id}:`, err);
     handleFailure(task);
   }
 }
 
 function handleFailure(task) {
   task.retries = (task.retries || 0) + 1;
-  if (task.retries <= MAX_RETRIES) retryQueue.push(task);
-  else failedCount++;
+  if (task.retries <= MAX_RETRIES) {
+    retryQueue.push(task);
+  } else {
+    failedCount++;
+  }
+  persistState();
+  schedule();
 }
 
 /* =====================================================
-   Redirect Observer Logic (CORE)
+   Redirect Observer Logic
 ===================================================== */
 
 function startRedirectObserver(tabId, originalUrl) {
@@ -132,7 +141,37 @@ chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
     chrome.scripting.executeScript({
       target: { tabId },
       files: ["content.js"]
+    }).catch(err => {
+      // Silently fail on restricted pages (chrome://, about:, etc.)
+      if (!err.message.includes("Cannot access")) {
+        console.error(`Failed to inject content script in tab ${tabId}:`, err);
+      }
     });
+  }
+});
+
+/* =====================================================
+   Tab Removal Handler - CRITICAL FIX
+===================================================== */
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  // Clean up redirect observers
+  if (redirectObservers[tabId]) {
+    clearTimeout(redirectObservers[tabId].timer);
+    delete redirectObservers[tabId];
+  }
+  delete redirectInfoByTab[tabId];
+  
+  // Handle task failure if tab was closed externally
+  const entry = Object.entries(activeTasks).find(
+    ([, t]) => t.tabId === tabId
+  );
+  
+  if (entry) {
+    console.warn(`Tab ${tabId} closed externally, marking task as failed`);
+    const task = activeTasks[entry[0]];
+    delete activeTasks[entry[0]];
+    handleFailure(task);
   }
 });
 
@@ -150,47 +189,132 @@ function completeTaskByTabId(tabId) {
   completedCount++;
 
   delete redirectInfoByTab[tabId];
-  delete redirectObservers[tabId];
+  
+  // Clean up observer
+  if (redirectObservers[tabId]) {
+    clearTimeout(redirectObservers[tabId].timer);
+    delete redirectObservers[tabId];
+  }
 
-  chrome.tabs.remove(tabId);
+  // Close tab with error handling
+  chrome.tabs.remove(tabId).catch(err => {
+    console.warn(`Tab ${tabId} already closed or removed:`, err);
+  });
+  
   persistState();
   schedule();
 }
 
 /* =====================================================
-   Messages
+   Helper: Create Task with Validation
+===================================================== */
+
+function createTask(url) {
+  // Validate URL
+  try {
+    new URL(url);
+  } catch (err) {
+    console.warn(`Invalid URL skipped: ${url}`);
+    return null;
+  }
+  
+  return {
+    id: taskIdCounter++,
+    url,
+    retries: 0
+  };
+}
+
+/* =====================================================
+   Helper: Clean Up All Active Tasks
+===================================================== */
+
+async function cleanupAllActiveTasks() {
+  const tabIds = Object.values(activeTasks)
+    .map(t => t.tabId)
+    .filter(Boolean);
+  
+  if (tabIds.length > 0) {
+    try {
+      await chrome.tabs.remove(tabIds);
+    } catch (err) {
+      console.warn('Some tabs could not be removed:', err);
+    }
+  }
+  
+  // Clear all observers
+  Object.keys(redirectObservers).forEach(tabId => {
+    clearTimeout(redirectObservers[tabId]?.timer);
+    delete redirectObservers[tabId];
+  });
+  
+  activeTasks = {};
+  redirectInfoByTab = {};
+}
+
+/* =====================================================
+   Messages - FIXED with proper return values
 ===================================================== */
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   switch (msg.type) {
     case "TASK_DONE":
       if (sender.tab?.id) completeTaskByTabId(sender.tab.id);
-      break;
+      return false; // Synchronous, no response needed
 
     case "START_QUEUE":
-      queue = msg.urls.map((url, i) => ({
-        id: i + 1,
-        url,
-        retries: 0
-      }));
-      retryQueue = [];
-      activeTasks = {};
-      completedCount = 0;
-      failedCount = 0;
-      paused = false;
-      persistState();
-      schedule();
-      break;
+      (async () => {
+        try {
+          // Clean up existing tasks first
+          await cleanupAllActiveTasks();
+          
+          // Filter and create valid tasks
+          const tasks = msg.urls
+            .map(url => createTask(url))
+            .filter(Boolean);
+          
+          if (tasks.length === 0) {
+            sendResponse({ success: false, error: "No valid URLs provided" });
+            return;
+          }
+          
+          queue = tasks;
+          retryQueue = [];
+          completedCount = 0;
+          failedCount = 0;
+          paused = false;
+          
+          persistState();
+          schedule();
+          
+          sendResponse({ success: true, queued: tasks.length });
+        } catch (err) {
+          console.error('START_QUEUE error:', err);
+          sendResponse({ success: false, error: err.message });
+        }
+      })();
+      return true; // Async response
 
     case "CLEAR_QUEUE":
-      queue = [];
-      retryQueue = [];
-      activeTasks = {};
-      completedCount = 0;
-      failedCount = 0;
-      paused = true;
-      persistState();
-      break;
+      (async () => {
+        try {
+          await cleanupAllActiveTasks();
+          
+          queue = [];
+          retryQueue = [];
+          completedCount = 0;
+          failedCount = 0;
+          paused = true;
+          
+          persistState();
+          
+          sendResponse({ success: true });
+        } catch (err) {
+          console.error('CLEAR_QUEUE error:', err);
+          sendResponse({ success: false, error: err.message });
+        }
+      })();
+      return true; // Async response
 
     case "SET_CONCURRENCY":
       maxConcurrent = Math.max(
@@ -199,7 +323,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       );
       persistState();
       schedule();
-      break;
+      sendResponse({ success: true, maxConcurrent });
+      return true; // Keep channel open
 
     case "STATUS":
       sendResponse({
@@ -210,7 +335,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         paused,
         maxConcurrent
       });
-      break;
+      return true; // Keep channel open
 
     case "GET_REDIRECT_INFO":
       if (sender.tab?.id && redirectInfoByTab[sender.tab.id]) {
@@ -218,6 +343,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       } else {
         sendResponse(null);
       }
-      break;
+      return true; // Keep channel open
   }
+  
+  return false; // Close channel for unhandled messages
 });

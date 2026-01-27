@@ -1,16 +1,11 @@
 {
   "manifest_version": 3,
   "name": "Controlled Queue Loader",
-  "version": "1.7.0",
+  "version": "1.8.0",
   "description": "Open URLs in a controlled queue, mark pages as done manually, and load the next task with clear visual status indicators.",
-  "permissions": [
-    "tabs",
-    "storage",
-    "scripting"
-  ],
-  "host_permissions": [
-    "<all_urls>"
-  ],
+  "minimum_chrome_version": "114",
+  "permissions": ["tabs", "storage", "scripting"],
+  "host_permissions": ["<all_urls>"],
   "background": {
     "service_worker": "background.js",
     "type": "module"
@@ -25,6 +20,9 @@
       },
       "description": "Mark current task as done"
     }
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
   },
   "icons": {
     "16": "icons/icon16.png",

@@ -1,20 +1,29 @@
 (() => {
-  if (window.__CQL_RIBBON__) return;
-  window.__CQL_RIBBON__ = true;
+  // Prevent multiple injections
+  if (document.getElementById('cql-ribbon') || document.getElementById('queue-mark-done')) {
+    return;
+  }
 
   const AUTO_COLLAPSE_MS = 3000;
   const LOAD_DELAY = 400;
   const SLOW_LOAD_MS = 3000;
+  const LOADING_MAX_TIMEOUT = 30000; // 30 seconds max for loading indicator
   const STORAGE_KEY = "cql-markdone-pos";
   const INVALID_PATTERNS = ["/sb0/", "/sb1/", "/redir_sku/", "/bnd/", "/brand/", "/cat/"];
 
   const el = id => document.getElementById(id);
 
   let loadStart = performance.now();
-  let redirectHistory = [];
+  let redirectHistory = [location.href];
   let finalUrlObserved = location.href;
 
   /* ---------------- helpers ---------------- */
+
+  function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
 
   function extractSKU(url) {
     const m = url.match(/-([a-zA-Z0-9]+)\.html/);
@@ -48,11 +57,22 @@
 
   function confidenceScore({ urlMatch, skuMatch, piidMatch, valid }) {
     let score = 0;
-    if (urlMatch) score += 25;
-    if (skuMatch) score += 25;
+    
+    // Invalid URL = 0 confidence
+    if (!valid) return 0;
+    
+    score += 30; // Base for valid URL
+    
+    // SKU match is critical for product pages
+    if (skuMatch) score += 35;
+    
+    // PIID match confirms variant
     if (piidMatch) score += 25;
-    if (valid) score += 25;
-    return score;
+    
+    // URL match is less important (canonical redirects are valid)
+    if (urlMatch) score += 10;
+    
+    return Math.min(100, score);
   }
 
   function scoreColor(score) {
@@ -64,8 +84,12 @@
   /* ---------------- loading indicator ---------------- */
 
   let loadingRibbon;
-  setTimeout(() => {
+  let loadingTimeout;
+  let loadingMaxTimeout;
+  
+  loadingTimeout = setTimeout(() => {
     if (el("cql-ribbon")) return;
+    
     loadingRibbon = document.createElement("div");
     loadingRibbon.id = "cql-loading";
     Object.assign(loadingRibbon.style, {
@@ -77,15 +101,22 @@
       background: "#e0f2fe",
       color: "#075985",
       fontWeight: "700",
-      zIndex: 2147483646,
+      zIndex: "2147483646",
       borderBottom: "1px solid #bae6fd",
       textAlign: "center"
     });
     loadingRibbon.textContent = "⏳ Loading page…";
     document.documentElement.appendChild(loadingRibbon);
+    
+    // Safety: remove after max timeout
+    loadingMaxTimeout = setTimeout(() => {
+      clearLoading();
+    }, LOADING_MAX_TIMEOUT);
   }, LOAD_DELAY);
 
   function clearLoading() {
+    clearTimeout(loadingTimeout);
+    clearTimeout(loadingMaxTimeout);
     loadingRibbon?.remove();
   }
 
@@ -109,7 +140,7 @@
       borderRadius: "6px",
       fontWeight: "600",
       cursor: "grab",
-      zIndex: 2147483647
+      zIndex: "2147483647"
     });
 
     chrome.storage.local.get(STORAGE_KEY, res => {
@@ -129,8 +160,11 @@
 
       const move = ev => {
         drag = true;
-        btn.style.left = ev.clientX - ox + "px";
-        btn.style.top = ev.clientY - oy + "px";
+        // Bound the button within viewport
+        const newLeft = Math.max(0, Math.min(window.innerWidth - btn.offsetWidth, ev.clientX - ox));
+        const newTop = Math.max(0, Math.min(window.innerHeight - btn.offsetHeight, ev.clientY - oy));
+        btn.style.left = newLeft + "px";
+        btn.style.top = newTop + "px";
       };
 
       const up = () => {
@@ -158,16 +192,35 @@
     document.documentElement.appendChild(btn);
   }
 
-  /* ---------------- redirect observer ---------------- */
+  /* ---------------- redirect observer - FIXED with History API ---------------- */
 
-  const observer = new MutationObserver(() => {
+  // Modern approach for SPA navigation
+  ['pushState', 'replaceState'].forEach(method => {
+    const original = history[method];
+    history[method] = function(...args) {
+      const result = original.apply(this, args);
+      if (location.href !== finalUrlObserved) {
+        finalUrlObserved = location.href;
+        redirectHistory.push(finalUrlObserved);
+      }
+      return result;
+    };
+  });
+
+  // Catch hashchange and popstate
+  window.addEventListener('hashchange', () => {
     if (location.href !== finalUrlObserved) {
       finalUrlObserved = location.href;
       redirectHistory.push(finalUrlObserved);
     }
   });
 
-  observer.observe(document, { subtree: true, childList: true });
+  window.addEventListener('popstate', () => {
+    if (location.href !== finalUrlObserved) {
+      finalUrlObserved = location.href;
+      redirectHistory.push(finalUrlObserved);
+    }
+  });
 
   /* ---------------- RIBBON ---------------- */
 
@@ -224,11 +277,12 @@
       width: "100%",
       padding: "12px 16px",
       background: bg,
-      zIndex: 2147483646,
+      zIndex: "2147483646",
       fontSize: "13px",
       borderBottom: "1px solid rgba(0,0,0,0.15)"
     });
 
+    // Using escapeHtml to prevent XSS
     ribbon.innerHTML = `
       <div style="display:flex;justify-content:space-between;font-weight:700">
         <div>🔁 Page processed</div>
@@ -236,7 +290,7 @@
       </div>
 
       <div style="margin-top:4px;font-size:12px">
-        Domain: <strong>${location.hostname}</strong>
+        Domain: <strong>${escapeHtml(location.hostname)}</strong>
       </div>
 
       <div style="margin-top:4px;display:flex;gap:6px;flex-wrap:wrap">
@@ -250,8 +304,8 @@
       <div style="font-size:12px;opacity:.8">${reason}</div>
 
       <div style="margin-top:8px;display:grid;grid-template-columns:1fr 1fr;gap:8px">
-        <div><strong>SKU</strong><br>O: ${skuO || "-"}<br>F: ${skuF || "-"}</div>
-        <div><strong>PIID</strong><br>O: ${piidO || "-"}<br>F: ${piidF || "-"}</div>
+        <div><strong>SKU</strong><br>O: ${escapeHtml(skuO || "-")}<br>F: ${escapeHtml(skuF || "-")}</div>
+        <div><strong>PIID</strong><br>O: ${escapeHtml(piidO || "-")}<br>F: ${escapeHtml(piidF || "-")}</div>
       </div>
 
       <div style="margin-top:6px;font-size:12px">
@@ -261,8 +315,8 @@
       <button id="toggle" style="margin-top:8px;border:none;background:none;color:#0d6efd;cursor:pointer">Hide details</button>
 
       <div id="details" style="margin-top:6px;font-size:12px">
-        <div><strong>Original URL</strong><br>${original}<br><button id="co">Copy</button></div>
-        <div style="margin-top:6px"><strong>Final URL</strong><br>${final}<br><button id="cf">Copy</button></div>
+        <div><strong>Original URL</strong><br>${escapeHtml(original)}<br><button id="co">Copy</button></div>
+        <div style="margin-top:6px"><strong>Final URL</strong><br>${escapeHtml(final)}<br><button id="cf">Copy</button></div>
       </div>
 
       <div style="margin-top:8px;font-size:11px;opacity:.7">
@@ -299,7 +353,14 @@
     el("dismiss").onclick = () => ribbon.remove();
   }
 
+  // Request redirect info with error handling
   chrome.runtime.sendMessage({ type: "GET_REDIRECT_INFO" }, info => {
+    if (chrome.runtime.lastError) {
+      console.warn('Extension context invalidated:', chrome.runtime.lastError);
+      // Fallback: render with current URL
+      renderRibbon(location.href, location.href, null);
+      return;
+    }
     renderRibbon(info?.original || location.href, info?.final || location.href, info?.progress);
   });
 })();
