@@ -8,7 +8,24 @@ let activeTasks = {};
 let completedCount = 0;
 let failedCount = 0;
 let paused = false;
-let taskIdCounter = Date.now(); // Unique task IDs
+let taskIdCounter = Date.now();
+
+/* =====================================================
+   Session Log — tracks every completed URL for export
+===================================================== */
+
+let sessionLog = []; // Array of log entries for today's session
+
+function addLogEntry(entry) {
+  const now = new Date();
+  sessionLog.push({
+    timestamp: now.toISOString(),
+    date: now.toLocaleDateString("en-GB"),
+    time: now.toLocaleTimeString("en-GB"),
+    ...entry,
+  });
+  persistState();
+}
 
 /* =====================================================
    Redirect Observer Engine
@@ -31,6 +48,7 @@ function persistState() {
     paused,
     maxConcurrent,
     taskIdCounter,
+    sessionLog,
   });
 }
 
@@ -45,6 +63,11 @@ async function restoreState() {
   paused = data.paused || false;
   maxConcurrent = Math.min(MAX_CONCURRENCY_CAP, data.maxConcurrent || 2);
   taskIdCounter = data.taskIdCounter || Date.now();
+
+  // Restore session log, but only keep today's entries
+  const today = new Date().toLocaleDateString("en-GB");
+  const stored = data.sessionLog || [];
+  sessionLog = stored.filter((e) => e.date === today);
 
   if (!paused) schedule();
 }
@@ -79,7 +102,6 @@ async function startTask(task) {
     task.tabId = tab.id;
     activeTasks[task.id] = task;
 
-    // Initialize redirect observer
     startRedirectObserver(tab.id, task.url);
   } catch (err) {
     console.error(`Failed to create tab for task ${task.id}:`, err);
@@ -93,9 +115,92 @@ function handleFailure(task) {
     retryQueue.push(task);
   } else {
     failedCount++;
+    // Log failed entry
+    addLogEntry({
+      originalUrl: task.url,
+      finalUrl: task.url,
+      status: "FAILED",
+      redirected: "No",
+      skuOriginal: extractSKU(task.url) || "-",
+      skuFinal: "-",
+      piidOriginal: extractPIID(task.url) || "-",
+      piidFinal: "-",
+      confidence: 0,
+      notes: `Failed after ${task.retries} retries`,
+    });
   }
   persistState();
   schedule();
+}
+
+/* =====================================================
+   URL Helpers (mirrored from content.js for logging)
+===================================================== */
+
+function extractSKU(url) {
+  const m = url.match(/-([a-zA-Z0-9]+)\.html/);
+  return m ? m[1] : null;
+}
+
+function extractPIID(url) {
+  try {
+    const v = new URL(url).searchParams.get("piid");
+    return v ? v.split("%2C").sort().join(",") : null;
+  } catch {
+    return null;
+  }
+}
+
+const INVALID_PATTERNS = [
+  "/sb0/",
+  "/sb1/",
+  "/redir_sku/",
+  "/bnd/",
+  "/brand/",
+  "/cat/",
+];
+
+function looksInvalid(url) {
+  if (!url.endsWith(".html") && !url.includes(".html?")) return true;
+  return INVALID_PATTERNS.some((p) => url.includes(p));
+}
+
+function confidenceScore({ urlMatch, skuMatch, piidMatch, valid }) {
+  if (!valid) return 0;
+  let score = 30;
+  if (skuMatch) score += 35;
+  if (piidMatch) score += 25;
+  if (urlMatch) score += 10;
+  return Math.min(100, score);
+}
+
+function deriveStatus(original, final) {
+  const invalid = looksInvalid(final);
+  const urlMatch = original === final;
+  const skuO = extractSKU(original);
+  const skuF = extractSKU(final);
+  const piidO = extractPIID(original);
+  const piidF = extractPIID(final);
+  const skuMatch = skuO === skuF;
+  const piidMatch = piidO === piidF;
+  const valid = !invalid;
+
+  const confidence = confidenceScore({ urlMatch, skuMatch, piidMatch, valid });
+
+  let status = "NO REDIRECTION";
+  if (!urlMatch) status = "REDIRECTED";
+  if (invalid) status = "UNKNOWN: URL IS INVALID";
+  if (!piidMatch) status = "UNKNOWN: VARIATION NOT SELECTED";
+
+  return {
+    status,
+    skuOriginal: skuO || "-",
+    skuFinal: skuF || "-",
+    piidOriginal: piidO || "-",
+    piidFinal: piidF || "-",
+    confidence,
+    redirected: urlMatch ? "No" : "Yes",
+  };
 }
 
 /* =====================================================
@@ -121,7 +226,7 @@ function scheduleRedirectFinalize(tabId) {
       original: observer.original,
       final: observer.lastUrl,
     };
-  }, 2500); // final stabilization window
+  }, 2500);
 }
 
 chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
@@ -135,7 +240,6 @@ chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
     scheduleRedirectFinalize(tabId);
   }
 
-  // Inject content.js once page loads
   if (info.status === "complete") {
     chrome.scripting
       .executeScript({
@@ -143,7 +247,6 @@ chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
         files: ["content.js"],
       })
       .catch((err) => {
-        // Silently fail on restricted pages (chrome://, about:, etc.)
         if (!err.message.includes("Cannot access")) {
           console.error(
             `Failed to inject content script in tab ${tabId}:`,
@@ -155,18 +258,16 @@ chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
 });
 
 /* =====================================================
-   Tab Removal Handler - CRITICAL FIX
+   Tab Removal Handler
 ===================================================== */
 
 chrome.tabs.onRemoved.addListener((tabId) => {
-  // Clean up redirect observers
   if (redirectObservers[tabId]) {
     clearTimeout(redirectObservers[tabId].timer);
     delete redirectObservers[tabId];
   }
   delete redirectInfoByTab[tabId];
 
-  // Handle task failure if tab was closed externally
   const entry = Object.entries(activeTasks).find(([, t]) => t.tabId === tabId);
 
   if (entry) {
@@ -181,22 +282,34 @@ chrome.tabs.onRemoved.addListener((tabId) => {
    Completion
 ===================================================== */
 
-function completeTaskByTabId(tabId) {
+function completeTaskByTabId(tabId, reportData) {
   const entry = Object.entries(activeTasks).find(([, t]) => t.tabId === tabId);
   if (!entry) return;
 
+  const task = activeTasks[entry[0]];
   delete activeTasks[entry[0]];
   completedCount++;
 
+  // Build log entry using redirect info + any data from content script
+  const info = redirectInfoByTab[tabId];
+  const original = info?.original || task.url;
+  const final = info?.final || task.url;
+  const derived = deriveStatus(original, final);
+
+  addLogEntry({
+    originalUrl: original,
+    finalUrl: final,
+    ...derived,
+    notes: reportData?.notes || "",
+  });
+
   delete redirectInfoByTab[tabId];
 
-  // Clean up observer
   if (redirectObservers[tabId]) {
     clearTimeout(redirectObservers[tabId].timer);
     delete redirectObservers[tabId];
   }
 
-  // Close tab with error handling
   chrome.tabs.remove(tabId).catch((err) => {
     console.warn(`Tab ${tabId} already closed or removed:`, err);
   });
@@ -210,7 +323,6 @@ function completeTaskByTabId(tabId) {
 ===================================================== */
 
 function createTask(url) {
-  // Validate URL
   try {
     new URL(url);
   } catch (err) {
@@ -242,7 +354,6 @@ async function cleanupAllActiveTasks() {
     }
   }
 
-  // Clear all observers
   Object.keys(redirectObservers).forEach((tabId) => {
     clearTimeout(redirectObservers[tabId]?.timer);
     delete redirectObservers[tabId];
@@ -253,22 +364,20 @@ async function cleanupAllActiveTasks() {
 }
 
 /* =====================================================
-   Messages - FIXED with proper return values
+   Messages
 ===================================================== */
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   switch (msg.type) {
     case "TASK_DONE":
-      if (sender.tab?.id) completeTaskByTabId(sender.tab.id);
-      return false; // Synchronous, no response needed
+      if (sender.tab?.id) completeTaskByTabId(sender.tab.id, msg.data || {});
+      return false;
 
     case "START_QUEUE":
       (async () => {
         try {
-          // Clean up existing tasks first
           await cleanupAllActiveTasks();
 
-          // Filter and create valid tasks
           const tasks = msg.urls.map((url) => createTask(url)).filter(Boolean);
 
           if (tasks.length === 0) {
@@ -291,7 +400,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           sendResponse({ success: false, error: err.message });
         }
       })();
-      return true; // Async response
+      return true;
 
     case "CLEAR_QUEUE":
       (async () => {
@@ -312,14 +421,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           sendResponse({ success: false, error: err.message });
         }
       })();
-      return true; // Async response
+      return true;
 
     case "SET_CONCURRENCY":
       maxConcurrent = Math.max(1, Math.min(MAX_CONCURRENCY_CAP, msg.value));
       persistState();
       schedule();
       sendResponse({ success: true, maxConcurrent });
-      return true; // Keep channel open
+      return true;
 
     case "STATUS":
       sendResponse({
@@ -329,8 +438,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         failed: failedCount,
         paused,
         maxConcurrent,
+        logCount: sessionLog.length,
       });
-      return true; // Keep channel open
+      return true;
 
     case "GET_REDIRECT_INFO":
       if (sender.tab?.id && redirectInfoByTab[sender.tab.id]) {
@@ -338,8 +448,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       } else {
         sendResponse(null);
       }
-      return true; // Keep channel open
+      return true;
+
+    case "GET_SESSION_LOG":
+      sendResponse({ log: sessionLog });
+      return true;
+
+    case "CLEAR_SESSION_LOG":
+      sessionLog = [];
+      persistState();
+      sendResponse({ success: true });
+      return true;
   }
 
-  return false; // Close channel for unhandled messages
+  return false;
 });

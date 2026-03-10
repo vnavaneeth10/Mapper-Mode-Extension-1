@@ -68,6 +68,7 @@ body.popup-container {
   border-radius: 6px;
   border: 1px solid #ced4da;
   font-family: monospace;
+  box-sizing: border-box;
 }
 
 .popup-textarea:focus {
@@ -81,6 +82,7 @@ body.popup-container {
   font-size: 13px;
   border-radius: 6px;
   border: 1px solid #ced4da;
+  box-sizing: border-box;
 }
 
 /* ---------- Toggle ---------- */
@@ -118,7 +120,13 @@ body.popup-container {
     transform 0.1s ease;
 }
 
-.popup-button:active {
+.popup-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.popup-button:active:not(:disabled) {
   transform: scale(0.97);
 }
 
@@ -127,7 +135,7 @@ body.popup-container {
   color: #fff;
 }
 
-.popup-button.primary:hover {
+.popup-button.primary:hover:not(:disabled) {
   background: #0b5ed7;
 }
 
@@ -136,7 +144,30 @@ body.popup-container {
   color: #842029;
 }
 
-.popup-button.danger:hover {
+.popup-button.danger:hover:not(:disabled) {
+  background: #e9ecef;
+}
+
+/* Export button */
+.popup-button.export {
+  background: #198754;
+  color: #fff;
+  flex: 2;
+}
+
+.popup-button.export:hover:not(:disabled) {
+  background: #157347;
+}
+
+/* Ghost button */
+.popup-button.ghost {
+  background: #f8f9fa;
+  color: #495057;
+  border: 1px solid #dee2e6;
+  flex: 1;
+}
+
+.popup-button.ghost:hover:not(:disabled) {
   background: #e9ecef;
 }
 
@@ -160,6 +191,34 @@ body.popup-container {
 
 .popup-status strong {
   font-weight: 700;
+}
+
+/* ---------- Export Section ---------- */
+
+.popup-export {
+  border-top: 1px solid #dee2e6;
+  padding-top: 10px;
+}
+
+.popup-export-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.log-count {
+  font-size: 12px;
+  background: #e9ecef;
+  color: #495057;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-weight: 600;
+}
+
+.popup-export-actions {
+  display: flex;
+  gap: 8px;
 }
 
 /* ---------- Toast ---------- */
@@ -186,6 +245,10 @@ body.popup-container {
 
 .toast.success {
   background: #198754;
+}
+
+.toast.error {
+  background: #dc3545;
 }
 
 .toast-actions button {

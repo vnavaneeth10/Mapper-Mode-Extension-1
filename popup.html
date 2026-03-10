@@ -55,9 +55,27 @@ https://example.com/page-2"
       <div><span>Failed</span><strong id="failed"></strong></div>
     </div>
 
+    <!-- Export Section -->
+    <div class="popup-section popup-export">
+      <div class="popup-export-info">
+        <span class="popup-label" style="margin:0">Today's session log</span>
+        <span id="logCount" class="log-count">0 entries</span>
+      </div>
+      <div class="popup-export-actions">
+        <button id="downloadReport" class="popup-button export">
+          ⬇ Download Excel Report
+        </button>
+        <button id="clearLog" class="popup-button ghost" title="Clear today's log">
+          Clear log
+        </button>
+      </div>
+    </div>
+
     <!-- Toast -->
     <div id="toast" class="toast hidden"></div>
 
+    <!-- SheetJS for Excel generation -->
+    <script src="xlsx.min.js"></script>
     <script src="popup.js"></script>
   </body>
 </html>
