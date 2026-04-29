@@ -67,21 +67,11 @@
 
   function confidenceScore({ urlMatch, skuMatch, piidMatch, valid }) {
     let score = 0;
-
-    // Invalid URL = 0 confidence
     if (!valid) return 0;
-
-    score += 30; // Base for valid URL
-
-    // SKU match is critical for product pages
+    score += 30;
     if (skuMatch) score += 35;
-
-    // PIID match confirms variant
     if (piidMatch) score += 25;
-
-    // URL match is less important (canonical redirects are valid)
     if (urlMatch) score += 10;
-
     return Math.min(100, score);
   }
 
@@ -89,6 +79,114 @@
     if (score >= 85) return "#198754";
     if (score >= 60) return "#ffc107";
     return "#dc3545";
+  }
+
+  /* =====================================================
+     Part Number Extraction — DOM only, zero network
+  ===================================================== */
+
+  function extractPartNumber() {
+    // Strategy 1: JSON-LD structured data (most reliable, Wayfair uses Product schema)
+    const jsonLdBlocks = document.querySelectorAll(
+      'script[type="application/ld+json"]'
+    );
+    for (const block of jsonLdBlocks) {
+      try {
+        const data = JSON.parse(block.textContent);
+        const items = Array.isArray(data) ? data : [data];
+        for (const item of items) {
+          // Handle @graph arrays
+          const nodes = item["@graph"] ? item["@graph"] : [item];
+          for (const node of nodes) {
+            if (node["@type"] === "Product") {
+              // mpn (Manufacturer Part Number) is the primary target
+              if (node.mpn) return { value: String(node.mpn), source: "JSON-LD mpn" };
+              if (node.sku) return { value: String(node.sku), source: "JSON-LD sku" };
+              if (node.productID) return { value: String(node.productID), source: "JSON-LD productID" };
+              if (node.model) return { value: String(node.model), source: "JSON-LD model" };
+            }
+          }
+        }
+      } catch {
+        // malformed JSON-LD, skip
+      }
+    }
+
+    // Strategy 2: Wayfair-specific global JS object (window.__STORE__ / window.wf_*)
+    try {
+      // Wayfair sometimes embeds product data in a script tag as a JS assignment
+      const allScripts = document.querySelectorAll("script:not([src])");
+      const partPatterns = [
+        /["']manufacturer_part_number["']\s*:\s*["']([^"']+)["']/i,
+        /["']manufacturerPartNumber["']\s*:\s*["']([^"']+)["']/i,
+        /["']model_number["']\s*:\s*["']([^"']+)["']/i,
+        /["']modelNumber["']\s*:\s*["']([^"']+)["']/i,
+        /["']part_number["']\s*:\s*["']([^"']+)["']/i,
+        /["']partNumber["']\s*:\s*["']([^"']+)["']/i,
+        /["']mpn["']\s*:\s*["']([^"']+)["']/i,
+      ];
+
+      for (const script of allScripts) {
+        const text = script.textContent;
+        // Skip tiny scripts and SheetJS/xlsx blobs
+        if (text.length < 20 || text.length > 500000) continue;
+        for (const pattern of partPatterns) {
+          const match = text.match(pattern);
+          if (match && match[1] && match[1].length < 60) {
+            return { value: match[1].trim(), source: "inline script" };
+          }
+        }
+      }
+    } catch {
+      // ignore
+    }
+
+    // Strategy 3: Meta tags
+    const metaSelectors = [
+      'meta[property="product:mfr_part_no"]',
+      'meta[name="mpn"]',
+      'meta[itemprop="mpn"]',
+      'meta[itemprop="sku"]',
+      'meta[itemprop="model"]',
+      'meta[name="model"]',
+    ];
+    for (const sel of metaSelectors) {
+      const tag = document.querySelector(sel);
+      if (tag?.content?.trim()) {
+        return { value: tag.content.trim(), source: "meta tag" };
+      }
+    }
+
+    // Strategy 4: Visible DOM — common Wayfair patterns
+    const domSelectors = [
+      '[data-hb-id*="PartNumber"]',
+      '[data-testid*="part-number"]',
+      '[data-testid*="model-number"]',
+      '[class*="PartNumber"]',
+      '[class*="partNumber"]',
+      '[class*="ModelNumber"]',
+      '[itemprop="mpn"]',
+      '[itemprop="sku"]',
+    ];
+    for (const sel of domSelectors) {
+      const node = document.querySelector(sel);
+      if (node?.textContent?.trim()) {
+        const text = node.textContent.trim().replace(/^(Part\s*#|Model\s*#|MPN|SKU)\s*[:•]?\s*/i, "");
+        if (text && text.length < 60) {
+          return { value: text, source: "DOM element" };
+        }
+      }
+    }
+
+    // Strategy 5: Label-text scan — "Part Number: XXXXX" anywhere on the page
+    const labelPattern = /(?:Part\s*(?:No\.?|Number|#)|Model\s*(?:No\.?|Number)|Manufacturer\s*Part\s*Number|MPN)\s*[:•]\s*([A-Z0-9\-_\/\.]{3,40})/i;
+    const bodyText = document.body.innerText || "";
+    const labelMatch = bodyText.match(labelPattern);
+    if (labelMatch) {
+      return { value: labelMatch[1].trim(), source: "page text" };
+    }
+
+    return null;
   }
 
   /* ---------------- loading indicator ---------------- */
@@ -118,7 +216,6 @@
     loadingRibbon.textContent = "⏳ Loading page…";
     document.documentElement.appendChild(loadingRibbon);
 
-    // Safety: remove after max timeout
     loadingMaxTimeout = setTimeout(() => {
       clearLoading();
     }, LOADING_MAX_TIMEOUT);
@@ -172,14 +269,13 @@
 
       const move = (ev) => {
         drag = true;
-        // Bound the button within viewport
         const newLeft = Math.max(
           0,
-          Math.min(window.innerWidth - btn.offsetWidth, ev.clientX - ox),
+          Math.min(window.innerWidth - btn.offsetWidth, ev.clientX - ox)
         );
         const newTop = Math.max(
           0,
-          Math.min(window.innerHeight - btn.offsetHeight, ev.clientY - oy),
+          Math.min(window.innerHeight - btn.offsetHeight, ev.clientY - oy)
         );
         btn.style.left = newLeft + "px";
         btn.style.top = newTop + "px";
@@ -210,9 +306,8 @@
     document.documentElement.appendChild(btn);
   }
 
-  /* ---------------- redirect observer - FIXED with History API ---------------- */
+  /* ---------------- redirect observer ---------------- */
 
-  // Modern approach for SPA navigation
   ["pushState", "replaceState"].forEach((method) => {
     const original = history[method];
     history[method] = function (...args) {
@@ -225,7 +320,6 @@
     };
   });
 
-  // Catch hashchange and popstate
   window.addEventListener("hashchange", () => {
     if (location.href !== finalUrlObserved) {
       finalUrlObserved = location.href;
@@ -261,12 +355,7 @@
     const piidMatch = piidO === piidF;
     const valid = !invalid;
 
-    const confidence = confidenceScore({
-      urlMatch,
-      skuMatch,
-      piidMatch,
-      valid,
-    });
+    const confidence = confidenceScore({ urlMatch, skuMatch, piidMatch, valid });
 
     let bg = "#e7f1ff";
     let statusText = "NO REDIRECTION";
@@ -290,6 +379,15 @@
       reason = "PIID mismatch between original and final URL";
     }
 
+    // Extract part number from DOM — runs at ribbon-render time (page is fully loaded)
+    const partInfo = extractPartNumber();
+    const partDisplay = partInfo
+      ? escapeHtml(partInfo.value)
+      : '<span style="opacity:.5;font-style:italic">Not found</span>';
+    const partSource = partInfo
+      ? `<span style="opacity:.6;font-size:10px"> via ${escapeHtml(partInfo.source)}</span>`
+      : "";
+
     const ribbon = document.createElement("div");
     ribbon.id = "cql-ribbon";
 
@@ -305,7 +403,6 @@
       borderBottom: "1px solid rgba(0,0,0,0.15)",
     });
 
-    // Using escapeHtml to prevent XSS
     ribbon.innerHTML = `
       <div style="display:flex;justify-content:space-between;font-weight:700">
         <div>🔁 Page processed</div>
@@ -333,6 +430,15 @@
 
       <div style="margin-top:6px;font-size:12px">
         Confidence: <strong style="color:${scoreColor(confidence)}">${confidence}%</strong>
+      </div>
+
+      <hr style="border:none;border-top:1px solid rgba(0,0,0,0.1);margin:8px 0">
+
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <span style="font-size:12px;font-weight:700">Part #:</span>
+        <span id="cql-part-value" style="font-size:12px;font-family:monospace;background:rgba(0,0,0,0.06);padding:2px 6px;border-radius:4px;user-select:all">${partDisplay}</span>
+        ${partSource}
+        ${partInfo ? `<button id="cql-copy-part" style="padding:2px 8px;font-size:11px;font-weight:600;border:1px solid rgba(0,0,0,0.2);border-radius:4px;background:#fff;cursor:pointer;margin-left:auto">Copy</button>` : ""}
       </div>
 
       <button id="toggle" style="margin-top:8px;border:none;background:none;color:#0d6efd;cursor:pointer">Hide details</button>
@@ -374,20 +480,35 @@
     el("cf").onclick = (e) => copy(final, e.target);
     el("close").onclick = () => ribbon.remove();
     el("dismiss").onclick = () => ribbon.remove();
+
+    // Part number copy button
+    if (partInfo) {
+      el("cql-copy-part").onclick = (e) => {
+        navigator.clipboard.writeText(partInfo.value).then(() => {
+          e.target.textContent = "✓ Copied!";
+          e.target.style.background = "#d1e7dd";
+          e.target.style.borderColor = "#a3cfbb";
+          setTimeout(() => {
+            e.target.textContent = "Copy";
+            e.target.style.background = "#fff";
+            e.target.style.borderColor = "rgba(0,0,0,0.2)";
+          }, 1800);
+        });
+      };
+    }
   }
 
   // Request redirect info with error handling
   chrome.runtime.sendMessage({ type: "GET_REDIRECT_INFO" }, (info) => {
     if (chrome.runtime.lastError) {
       console.warn("Extension context invalidated:", chrome.runtime.lastError);
-      // Fallback: render with current URL
       renderRibbon(location.href, location.href, null);
       return;
     }
     renderRibbon(
       info?.original || location.href,
       info?.final || location.href,
-      info?.progress,
+      info?.progress
     );
   });
 })();
