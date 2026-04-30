@@ -1,4 +1,4 @@
-![Version](https://img.shields.io/badge/version-1.8.0-blue)
+![Version](https://img.shields.io/badge/version-1.9.0-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Platform](https://img.shields.io/badge/platform-Chrome%20Extension-lightgrey)
 
@@ -74,6 +74,15 @@ You always know:
   - Completed tasks
   - Failed tasks
 - Makes long workflows predictable and manageable
+
+
+### Manufacturer Part Number extraction
+
+- Reads the part number directly from the page source — no Ctrl+U needed
+- Appears instantly in the ribbon overlay on every processed page
+- One-click Copy button for fast clipboard access
+- Works with Wayfair's internal data format (`manufacturingPartNumberDetails`)
+- Falls back through multiple detection strategies if the primary method fails
 
 ---
 

@@ -1,6 +1,8 @@
 Controlled Queue Loader does not collect, transmit, sell, or share any personal or sensitive user data.
 
-All data used by the extension (such as URL queue state, task progress, and user preferences) is stored locally on the user's device using chrome.storage.local. This data never leaves the user's browser and is not transmitted to any external servers.
+All data used by the extension (such as URL queue state, task progress, session log, and user preferences) is stored locally on the user's device using chrome.storage.local. This data never leaves the user's browser and is not transmitted to any external servers.
+
+The extension reads page content (specifically inline script tags) solely to extract manufacturer part numbers for display to the user within the current tab. No page content is stored, transmitted, or processed outside the browser.
 
 The extension does not use analytics, tracking, cookies, remote code, or third-party services of any kind.
 
