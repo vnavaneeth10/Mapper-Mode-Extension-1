@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Controlled Queue Loader",
   "version": "1.9.0",
-  "description": "Open URLs in a controlled queue, mark pages as done manually, track redirects, and instantly copy manufacturer part numbers — built for Wayfair product workflows.",
+  "description": "Process URLs in a controlled queue, detect redirects, and copy manufacturer part numbers with one click.",
   "minimum_chrome_version": "114",
   "permissions": [
     "tabs",
