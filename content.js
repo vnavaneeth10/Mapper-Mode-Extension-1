@@ -1,80 +1,60 @@
 (() => {
-  // Prevent multiple injections
   if (
     document.getElementById("cql-ribbon") ||
     document.getElementById("queue-mark-done")
-  ) {
-    return;
-  }
+  ) return;
 
-  const AUTO_COLLAPSE_MS = 3000;
-  const LOAD_DELAY = 400;
-  const SLOW_LOAD_MS = 3000;
+  const AUTO_COLLAPSE_MS    = 3000;
+  const LOAD_DELAY          = 400;
+  const SLOW_LOAD_MS        = 3000;
   const LOADING_MAX_TIMEOUT = 30000;
-  const STORAGE_KEY = "cql-markdone-pos";
-  const INVALID_PATTERNS = [
-    "/sb0/",
-    "/sb1/",
-    "/redir_sku/",
-    "/bnd/",
-    "/brand/",
-    "/cat/",
-  ];
+  const STORAGE_KEY         = "cql-markdone-pos";
+  const RIBBON_STATE_KEY    = "cql-ribbon-minimised";
+  const INVALID_PATTERNS    = ["/sb0/","/sb1/","/redir_sku/","/bnd/","/brand/","/cat/"];
 
   const el = (id) => document.getElementById(id);
 
-  let loadStart = performance.now();
-  let redirectHistory = [location.href];
+  let loadStart        = performance.now();
+  let redirectHistory  = [location.href];
   let finalUrlObserved = location.href;
+  let capturedPartNumber = null; // filled by tryExtractPartNumber
 
   /* ---------------- helpers ---------------- */
-
   function escapeHtml(str) {
     const div = document.createElement("div");
     div.textContent = str;
     return div.innerHTML;
   }
-
   function extractSKU(url) {
     const m = url.match(/-([a-zA-Z0-9]+)\.html/);
     return m ? m[1] : null;
   }
-
   function extractPIID(url) {
     try {
       const v = new URL(url).searchParams.get("piid");
       return v ? v.split("%2C").sort().join(",") : null;
-    } catch {
-      return null;
-    }
+    } catch { return null; }
   }
-
   function isReload() {
-    const nav = performance.getEntriesByType("navigation")[0];
-    return nav?.type === "reload";
+    return performance.getEntriesByType("navigation")[0]?.type === "reload";
   }
-
   function looksInvalid(url) {
     if (!url.endsWith(".html") && !url.includes(".html?")) return true;
     return INVALID_PATTERNS.some((p) => url.includes(p));
   }
-
   function copy(text, btn) {
     navigator.clipboard.writeText(text);
     btn.textContent = "✓ Copied";
     setTimeout(() => (btn.textContent = "Copy"), 1200);
   }
-
   function confidenceScore({ urlMatch, skuMatch, piidMatch, valid }) {
-    let score = 0;
     if (!valid) return 0;
-    score += 30;
-    if (skuMatch) score += 35;
-    if (piidMatch) score += 25;
-    if (urlMatch) score += 10;
-    return Math.min(100, score);
+    let s = 30;
+    if (skuMatch)  s += 35;
+    if (piidMatch) s += 25;
+    if (urlMatch)  s += 10;
+    return Math.min(100, s);
   }
-
   function scoreColor(score) {
     if (score >= 85) return "#198754";
     if (score >= 60) return "#ffc107";
@@ -83,143 +63,74 @@
 
   /* =====================================================
      Part Number Extraction
-     
-     Wayfair stores the part number inside a large escaped
-     JSON blob in an inline <script> tag, like:
-     
-       \"manufacturingPartNumberDetails\":{\"partNumber\":\"EEI-7081-ALA\"
-     
-     The backslashes mean it is double-encoded JSON-within-JSON,
-     so JSON.parse() of the script tag will NOT surface it.
-     We scan raw script text with a targeted regex instead.
-     
-     We also keep DOM/JSON-LD/dt fallbacks for robustness.
   ===================================================== */
-
   function extractPartNumberNow() {
-
-    // ── STRATEGY 1 (PRIMARY): Raw script text scan ──────────────────────────
-    // Targets Wayfair's double-encoded JSON blob:
-    //   "manufacturingPartNumberDetails":{"partNumber":"EEI-7081-ALA"
-    // or escaped variant:
-    //   \"manufacturingPartNumberDetails\":{\"partNumber\":\"EEI-7081-ALA\"
-    //
-    // We use two patterns: one for unescaped, one for backslash-escaped.
     const primaryPatterns = [
-      // unescaped (parsed JSON context)
       /"manufacturingPartNumberDetails"\s*:\s*\{[^}]*?"partNumber"\s*:\s*"([^"]{1,80})"/,
-      // backslash-escaped (raw string inside another JSON value)
       /\\"manufacturingPartNumberDetails\\"\s*:\s*\{\\"partNumber\\"\s*:\s*\\"([^"\\]{1,80})\\"/,
-      // alternative flat key spellings Wayfair may use
       /"partNumber"\s*:\s*"([A-Z0-9][A-Z0-9\-_\/\.]{1,50})"/,
       /\\"partNumber\\"\s*:\s*\\"([A-Z0-9][A-Z0-9\-_\/\.]{1,50})\\"/,
     ];
-
     for (const script of document.querySelectorAll("script:not([src])")) {
       const text = script.textContent;
-      // Skip tiny scripts and huge blobs unlikely to contain product data
       if (text.length < 50 || text.length > 2000000) continue;
-
-      // Fast pre-filter: only scan scripts that mention partNumber at all
       if (!text.includes("partNumber") && !text.includes("manufacturingPartNumber")) continue;
-
       for (const pattern of primaryPatterns) {
         const match = text.match(pattern);
         if (match?.[1]) {
           const value = match[1].trim();
-          // Sanity check: real part numbers are not generic words
-          if (value.length >= 2 && !/^(true|false|null|undefined)$/i.test(value)) {
-            return { value, source: "inline script (manufacturingPartNumberDetails)" };
-          }
+          if (value.length >= 2 && !/^(true|false|null|undefined)$/i.test(value))
+            return { value, source: "inline script" };
         }
       }
     }
-
-    // ── STRATEGY 2: Wayfair spec block DOM node ──────────────────────────────
-    // Rendered HTML: <div data-name="SpecificationsPartNumber">
-    //                  <dt>Part Number</dt><dd>EEI-7081-ALA</dd>
-    //                </div>
     const specBlock = document.querySelector('[data-name="SpecificationsPartNumber"]');
     if (specBlock) {
-      const dd = specBlock.querySelector("dd");
-      const text = dd?.textContent?.trim();
-      if (text && text.length > 0 && text.length < 80) {
-        return { value: text, source: "spec block" };
-      }
-      const rawText = specBlock.textContent?.replace(/Part\s*Number/i, "").trim();
-      if (rawText && rawText.length > 0 && rawText.length < 80) {
-        return { value: rawText, source: "spec block (text)" };
-      }
+      const text = specBlock.querySelector("dd")?.textContent?.trim();
+      if (text && text.length < 80) return { value: text, source: "spec block" };
+      const raw = specBlock.textContent?.replace(/Part\s*Number/i,"").trim();
+      if (raw && raw.length < 80) return { value: raw, source: "spec block (text)" };
     }
-
-    // BlockBuilder node variant
     const bbNode = document.querySelector('[data-node-id^="BlockBuilderSpecificationsPartNumber"]');
     if (bbNode) {
-      const dd = bbNode.querySelector("dd") || bbNode.nextElementSibling;
-      const text = dd?.textContent?.trim();
-      if (text && text.length > 0 && text.length < 80) {
-        return { value: text, source: "BlockBuilder node" };
-      }
+      const text = (bbNode.querySelector("dd") || bbNode.nextElementSibling)?.textContent?.trim();
+      if (text && text.length < 80) return { value: text, source: "BlockBuilder node" };
     }
-
-    // ── STRATEGY 3: dt/dd "Part Number" label scan ───────────────────────────
     for (const dt of document.querySelectorAll("dt")) {
       if (/part\s*number/i.test(dt.textContent)) {
-        const dd = dt.nextElementSibling;
-        const text = dd?.textContent?.trim();
-        if (text && text.length > 0 && text.length < 80) {
-          return { value: text, source: "dt/dd label" };
-        }
+        const text = dt.nextElementSibling?.textContent?.trim();
+        if (text && text.length < 80) return { value: text, source: "dt/dd label" };
       }
     }
-
-    // ── STRATEGY 4: JSON-LD Product schema ───────────────────────────────────
     for (const block of document.querySelectorAll('script[type="application/ld+json"]')) {
       try {
-        const data = JSON.parse(block.textContent);
+        const data  = JSON.parse(block.textContent);
         const items = Array.isArray(data) ? data : [data];
         for (const item of items) {
-          const nodes = item["@graph"] ? item["@graph"] : [item];
-          for (const node of nodes) {
+          for (const node of (item["@graph"] || [item])) {
             if (node["@type"] === "Product") {
-              if (node.mpn) return { value: String(node.mpn), source: "JSON-LD mpn" };
-              if (node.sku) return { value: String(node.sku), source: "JSON-LD sku" };
+              if (node.mpn)       return { value: String(node.mpn),       source: "JSON-LD mpn" };
+              if (node.sku)       return { value: String(node.sku),       source: "JSON-LD sku" };
               if (node.productID) return { value: String(node.productID), source: "JSON-LD productID" };
-              if (node.model) return { value: String(node.model), source: "JSON-LD model" };
+              if (node.model)     return { value: String(node.model),     source: "JSON-LD model" };
             }
           }
         }
-      } catch { /* skip malformed */ }
+      } catch { /* skip */ }
     }
-
-    // ── STRATEGY 5: Meta tags ─────────────────────────────────────────────────
-    for (const sel of [
-      'meta[property="product:mfr_part_no"]',
-      'meta[name="mpn"]',
-      'meta[itemprop="mpn"]',
-    ]) {
+    for (const sel of ['meta[property="product:mfr_part_no"]','meta[name="mpn"]','meta[itemprop="mpn"]']) {
       const tag = document.querySelector(sel);
       if (tag?.content?.trim()) return { value: tag.content.trim(), source: "meta tag" };
     }
-
     return null;
   }
 
-  /**
-   * tryExtractPartNumber
-   * Returns a Promise that resolves with { value, source } or null.
-   * Uses MutationObserver + polling so it waits for Wayfair's
-   * React hydration to inject the data before giving up.
-   */
   function tryExtractPartNumber() {
     return new Promise((resolve) => {
-      // Try immediately — scripts are present even before full hydration
       const instant = extractPartNumberNow();
       if (instant) return resolve(instant);
-
       const GIVE_UP_MS = 12000;
       let settled = false;
-
       function done(result) {
         if (settled) return;
         settled = true;
@@ -228,45 +139,23 @@
         clearTimeout(giveUpTimer);
         resolve(result);
       }
-
-      // MutationObserver: fires when any new DOM node is inserted
-      const observer = new MutationObserver(() => {
-        const result = extractPartNumberNow();
-        if (result) done(result);
-      });
-
-      observer.observe(document.body || document.documentElement, {
-        childList: true,
-        subtree: true,
-      });
-
-      // Polling at 800 ms — catches script tag additions MO may miss
-      const pollTimer = setInterval(() => {
-        const result = extractPartNumberNow();
-        if (result) done(result);
-      }, 800);
-
-      // Hard deadline: one final attempt then resolve null
-      const giveUpTimer = setTimeout(
-        () => done(extractPartNumberNow()),
-        GIVE_UP_MS
-      );
+      const observer = new MutationObserver(() => { const r = extractPartNumberNow(); if (r) done(r); });
+      observer.observe(document.body || document.documentElement, { childList: true, subtree: true });
+      const pollTimer   = setInterval(() => { const r = extractPartNumberNow(); if (r) done(r); }, 800);
+      const giveUpTimer = setTimeout(() => done(extractPartNumberNow()), GIVE_UP_MS);
     });
   }
 
   /* ---------------- loading indicator ---------------- */
-
   let loadingRibbon, loadingTimeout, loadingMaxTimeout;
-
   loadingTimeout = setTimeout(() => {
     if (el("cql-ribbon")) return;
     loadingRibbon = document.createElement("div");
     loadingRibbon.id = "cql-loading";
     Object.assign(loadingRibbon.style, {
-      position: "fixed", top: "0", left: "0", width: "100%",
-      padding: "14px", background: "#e0f2fe", color: "#075985",
-      fontWeight: "700", zIndex: "2147483646",
-      borderBottom: "1px solid #bae6fd", textAlign: "center",
+      position:"fixed",top:"0",left:"0",width:"100%",padding:"14px",
+      background:"#e0f2fe",color:"#075985",fontWeight:"700",
+      zIndex:"2147483646",borderBottom:"1px solid #bae6fd",textAlign:"center",
     });
     loadingRibbon.textContent = "⏳ Loading page…";
     document.documentElement.appendChild(loadingRibbon);
@@ -278,69 +167,86 @@
     clearTimeout(loadingMaxTimeout);
     loadingRibbon?.remove();
   }
-
   window.addEventListener("load", () => setTimeout(clearLoading, 300));
 
   /* ---------------- MARK DONE button ---------------- */
-
   if (!el("queue-mark-done")) {
     const btn = document.createElement("button");
     btn.id = "queue-mark-done";
     btn.textContent = "✔️ Mark Done";
     Object.assign(btn.style, {
-      position: "fixed", top: "180px", left: "16px",
-      padding: "8px 14px", background: "#212529", color: "#fff",
-      border: "none", borderRadius: "6px", fontWeight: "600",
-      cursor: "grab", zIndex: "2147483647",
+      position:"fixed",top:"180px",left:"16px",padding:"8px 14px",
+      background:"#212529",color:"#fff",border:"none",borderRadius:"6px",
+      fontWeight:"600",cursor:"grab",zIndex:"2147483647",
     });
-
     chrome.storage.local.get(STORAGE_KEY, (res) => {
       if (res[STORAGE_KEY]) {
-        btn.style.top = res[STORAGE_KEY].top + "px";
+        btn.style.top  = res[STORAGE_KEY].top  + "px";
         btn.style.left = res[STORAGE_KEY].left + "px";
       }
     });
-
     let drag = false, ox = 0, oy = 0;
     btn.onmousedown = (e) => {
       drag = false;
       const r = btn.getBoundingClientRect();
-      ox = e.clientX - r.left;
-      oy = e.clientY - r.top;
-
+      ox = e.clientX - r.left; oy = e.clientY - r.top;
       const move = (ev) => {
         drag = true;
-        btn.style.left = Math.max(0, Math.min(window.innerWidth - btn.offsetWidth, ev.clientX - ox)) + "px";
-        btn.style.top = Math.max(0, Math.min(window.innerHeight - btn.offsetHeight, ev.clientY - oy)) + "px";
+        btn.style.left = Math.max(0, Math.min(window.innerWidth  - btn.offsetWidth,  ev.clientX - ox)) + "px";
+        btn.style.top  = Math.max(0, Math.min(window.innerHeight - btn.offsetHeight, ev.clientY - oy)) + "px";
       };
-
       const up = () => {
         document.removeEventListener("mousemove", move);
-        document.removeEventListener("mouseup", up);
+        document.removeEventListener("mouseup",   up);
         if (drag) {
-          chrome.storage.local.set({
-            [STORAGE_KEY]: {
-              top: btn.getBoundingClientRect().top,
-              left: btn.getBoundingClientRect().left,
-            },
-          });
+          chrome.storage.local.set({ [STORAGE_KEY]: {
+            top:  btn.getBoundingClientRect().top,
+            left: btn.getBoundingClientRect().left,
+          }});
         } else {
-          btn.textContent = "⏳ Closing…";
+          // Send notes + part number along with TASK_DONE
+          const notesEl = el("cql-notes-input");
+          const notes   = notesEl ? notesEl.value.trim() : "";
+          btn.textContent      = "⏳ Closing…";
           btn.style.background = "#2fb344";
-          chrome.runtime.sendMessage({ type: "TASK_DONE" });
+          chrome.runtime.sendMessage({
+            type: "TASK_DONE",
+            data: { notes, partNumber: capturedPartNumber || "" },
+          });
         }
       };
-
       document.addEventListener("mousemove", move);
-      document.addEventListener("mouseup", up);
+      document.addEventListener("mouseup",   up);
     };
-
     document.documentElement.appendChild(btn);
   }
 
-  /* ---------------- redirect observer ---------------- */
+  /* ── Ctrl+Shift+W → Mark Done (existing shortcut, keep working) ── */
+  /* ── Ctrl+Shift+M → toggle minimise (new shortcut) ── */
+  document.addEventListener("keydown", (e) => {
+    if (e.ctrlKey && e.shiftKey) {
+      if (e.key === "W" || e.key === "w") {
+        e.preventDefault();
+        const notesEl = el("cql-notes-input");
+        const notes   = notesEl ? notesEl.value.trim() : "";
+        chrome.runtime.sendMessage({
+          type: "TASK_DONE",
+          data: { notes, partNumber: capturedPartNumber || "" },
+        });
+      }
+      if (e.key === "M" || e.key === "m") {
+        e.preventDefault();
+        const ribbon  = el("cql-ribbon");
+        const miniTab = el("cql-mini-tab");
+        if (!ribbon || !miniTab) return;
+        const isMinimised = ribbon.style.display === "none";
+        setMinimisedState(!isMinimised, ribbon, miniTab);
+      }
+    }
+  });
 
-  ["pushState", "replaceState"].forEach((method) => {
+  /* ---------------- redirect observer ---------------- */
+  ["pushState","replaceState"].forEach((method) => {
     const original = history[method];
     history[method] = function (...args) {
       const result = original.apply(this, args);
@@ -351,23 +257,25 @@
       return result;
     };
   });
-
   window.addEventListener("hashchange", () => {
-    if (location.href !== finalUrlObserved) {
-      finalUrlObserved = location.href;
-      redirectHistory.push(finalUrlObserved);
-    }
+    if (location.href !== finalUrlObserved) { finalUrlObserved = location.href; redirectHistory.push(finalUrlObserved); }
   });
-
   window.addEventListener("popstate", () => {
-    if (location.href !== finalUrlObserved) {
-      finalUrlObserved = location.href;
-      redirectHistory.push(finalUrlObserved);
-    }
+    if (location.href !== finalUrlObserved) { finalUrlObserved = location.href; redirectHistory.push(finalUrlObserved); }
   });
 
-  /* ---------------- RIBBON ---------------- */
+  /* =====================================================
+     Minimise/restore helper (shared by button + keyboard)
+  ===================================================== */
+  function setMinimisedState(minimised, ribbon, miniTab) {
+    ribbon.style.display  = minimised ? "none" : "block";
+    miniTab.style.display = minimised ? "flex"  : "none";
+    chrome.storage.local.set({ [RIBBON_STATE_KEY]: minimised });
+  }
 
+  /* =====================================================
+     RIBBON
+  ===================================================== */
   function renderRibbon(original, final, status) {
     clearLoading();
     if (el("cql-ribbon")) return;
@@ -377,33 +285,65 @@
     const piidO = extractPIID(original);
     const piidF = extractPIID(final);
 
-    const invalid = looksInvalid(final);
-    const reloaded = isReload();
-    const slowLoad = performance.now() - loadStart > SLOW_LOAD_MS;
+    const invalid       = looksInvalid(final);
+    const reloaded      = isReload();
+    const slowLoad      = performance.now() - loadStart > SLOW_LOAD_MS;
     const multiRedirect = redirectHistory.length > 1;
-    const urlMatch = original === final;
-    const skuMatch = skuO === skuF;
-    const piidMatch = piidO === piidF;
-    const valid = !invalid;
-    const confidence = confidenceScore({ urlMatch, skuMatch, piidMatch, valid });
+    const urlMatch      = original === final;
+    const skuMatch      = skuO === skuF;
+    const piidMatch     = piidO === piidF;
+    const valid         = !invalid;
+    const confidence    = confidenceScore({ urlMatch, skuMatch, piidMatch, valid });
 
-    let bg = "#e7f1ff", statusText = "NO REDIRECTION", reason = "Final URL matches original input";
-    if (!urlMatch) { bg = "#fff3cd"; statusText = "REDIRECTED"; reason = "Final URL differs from original"; }
-    if (invalid)   { bg = "#f8d7da"; statusText = "UNKNOWN : URL IS INVALID"; reason = "Invalid URL pattern detected"; }
-    if (!piidMatch){ bg = "#e2d9f3"; statusText = "UNKNOWN : VARIATION NOT SELECTED"; reason = "PIID mismatch between original and final URL"; }
+    let bg         = "#e7f1ff";
+    let statusText = "NO REDIRECTION";
+    let statusDot  = "#198754";
+    let reason     = "Final URL matches original input";
+    if (!urlMatch)  { bg = "#fff3cd"; statusText = "REDIRECTED";                    statusDot = "#e6a817"; reason = "Final URL differs from original"; }
+    if (invalid)    { bg = "#f8d7da"; statusText = "UNKNOWN: URL IS INVALID";       statusDot = "#dc3545"; reason = "Invalid URL pattern detected"; }
+    if (!piidMatch) { bg = "#e2d9f3"; statusText = "UNKNOWN: VARIATION NOT SELECTED"; statusDot = "#6f42c1"; reason = "PIID mismatch between original and final URL"; }
 
+    /* ── MINI TAB ── */
+    const miniTab = document.createElement("div");
+    miniTab.id = "cql-mini-tab";
+    Object.assign(miniTab.style, {
+      position:"fixed",top:"0",right:"0",display:"none",alignItems:"center",
+      gap:"8px",padding:"0 14px",height:"36px",background:bg,
+      borderBottom:"1px solid rgba(0,0,0,0.15)",borderLeft:"1px solid rgba(0,0,0,0.12)",
+      borderRadius:"0 0 0 8px",zIndex:"2147483646",boxShadow:"0 2px 6px rgba(0,0,0,0.12)",
+      fontSize:"12px",fontFamily:"system-ui,sans-serif",whiteSpace:"nowrap",
+    });
+    miniTab.innerHTML = `
+      <span style="width:9px;height:9px;border-radius:50%;background:${statusDot};display:inline-block;flex-shrink:0"></span>
+      <span style="font-weight:700;color:#212529">${escapeHtml(statusText)}</span>
+      <button id="cql-restore" title="Restore ribbon  (Ctrl+Shift+M)"
+        style="padding:2px 10px;font-size:11px;font-weight:600;border:1px solid
+               rgba(0,0,0,0.2);border-radius:4px;background:#fff;cursor:pointer;margin-left:4px">
+        ▲ Show
+      </button>
+    `;
+    document.documentElement.appendChild(miniTab);
+
+    /* ── FULL RIBBON ── */
     const ribbon = document.createElement("div");
     ribbon.id = "cql-ribbon";
     Object.assign(ribbon.style, {
-      position: "fixed", top: "0", left: "0", width: "100%",
-      padding: "12px 16px", background: bg, zIndex: "2147483646",
-      fontSize: "13px", borderBottom: "1px solid rgba(0,0,0,0.15)",
+      position:"fixed",top:"0",left:"0",width:"100%",padding:"12px 16px",
+      background:bg,zIndex:"2147483646",fontSize:"13px",
+      borderBottom:"1px solid rgba(0,0,0,0.15)",fontFamily:"system-ui,sans-serif",
     });
 
     ribbon.innerHTML = `
-      <div style="display:flex;justify-content:space-between;font-weight:700">
+      <div style="display:flex;justify-content:space-between;align-items:center;font-weight:700">
         <div>🔁 Page processed</div>
-        <div>${status || ""}</div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <button id="cql-minimise" title="Minimise ribbon  (Ctrl+Shift+M)"
+            style="padding:2px 10px;font-size:11px;font-weight:600;border:1px solid
+                   rgba(0,0,0,0.2);border-radius:4px;background:#fff;cursor:pointer">
+            ▼ Minimise
+          </button>
+          <span id="close" style="cursor:pointer;font-weight:700;font-size:15px;line-height:1" title="Dismiss">✕</span>
+        </div>
       </div>
 
       <div style="margin-top:4px;font-size:12px">
@@ -411,9 +351,9 @@
       </div>
 
       <div style="margin-top:4px;display:flex;gap:6px;flex-wrap:wrap">
-        ${reloaded    ? `<span style="background:#ffeeba;padding:2px 6px;border-radius:6px">RELOADED</span>` : ""}
-        ${slowLoad    ? `<span style="background:#cff4fc;padding:2px 6px;border-radius:6px">SLOW LOAD</span>` : ""}
-        ${multiRedirect?`<span style="background:#fff3cd;padding:2px 6px;border-radius:6px">MULTI REDIRECT</span>` : ""}
+        ${reloaded     ? `<span style="background:#ffeeba;padding:2px 6px;border-radius:6px">RELOADED</span>` : ""}
+        ${slowLoad     ? `<span style="background:#cff4fc;padding:2px 6px;border-radius:6px">SLOW LOAD</span>` : ""}
+        ${multiRedirect? `<span style="background:#fff3cd;padding:2px 6px;border-radius:6px">MULTI REDIRECT</span>` : ""}
         <span style="background:#dee2e6;padding:2px 6px;border-radius:6px">BETA</span>
       </div>
 
@@ -439,14 +379,29 @@
           Searching…
         </span>
         <button id="cql-copy-part"
-          style="padding:2px 8px;font-size:11px;font-weight:600;
-                 border:1px solid rgba(0,0,0,0.2);border-radius:4px;
-                 background:#fff;cursor:pointer;margin-left:auto;display:none">
+          style="padding:2px 8px;font-size:11px;font-weight:600;border:1px solid
+                 rgba(0,0,0,0.2);border-radius:4px;background:#fff;cursor:pointer;
+                 margin-left:auto;display:none">
           Copy
         </button>
       </div>
 
-      <button id="toggle" style="margin-top:8px;border:none;background:none;color:#0d6efd;cursor:pointer">
+      <hr style="border:none;border-top:1px solid rgba(0,0,0,0.1);margin:8px 0">
+
+      <div style="font-size:12px">
+        <label for="cql-notes-input" style="font-weight:700;display:block;margin-bottom:4px">
+          📝 Notes <span style="font-weight:400;opacity:.7">(optional — saved to Excel report)</span>
+        </label>
+        <textarea id="cql-notes-input"
+          placeholder="e.g. wrong image, price mismatch, missing description…"
+          style="width:100%;box-sizing:border-box;padding:6px 8px;font-size:12px;
+                 font-family:system-ui,sans-serif;border:1px solid rgba(0,0,0,0.2);
+                 border-radius:6px;resize:vertical;min-height:44px;max-height:120px;
+                 background:rgba(255,255,255,0.8);outline:none;"></textarea>
+      </div>
+
+      <button id="toggle"
+        style="margin-top:8px;border:none;background:none;color:#0d6efd;cursor:pointer">
         Hide details
       </button>
 
@@ -461,51 +416,66 @@
 
       <div style="text-align:right;margin-top:6px">
         <span id="dismiss" style="cursor:pointer;text-decoration:underline">Dismiss</span>
-        &nbsp;&nbsp;
-        <span id="close" style="cursor:pointer;font-weight:700">✕</span>
       </div>
     `;
 
     document.documentElement.appendChild(ribbon);
 
-    let open = true;
-    el("toggle").onclick = () => {
-      open = !open;
-      el("details").style.display = open ? "block" : "none";
-      el("toggle").textContent = open ? "Hide details" : "Show details";
-    };
+    /* ── minimise / restore ── */
+    el("cql-minimise").onclick = () => setMinimisedState(true,  ribbon, miniTab);
+    el("cql-restore").onclick  = () => setMinimisedState(false, ribbon, miniTab);
 
+    /* ── dismiss ── */
+    function dismissAll() {
+      ribbon.remove();
+      miniTab.remove();
+      chrome.storage.local.remove(RIBBON_STATE_KEY);
+    }
+    el("close").onclick   = dismissAll;
+    el("dismiss").onclick = dismissAll;
+
+    /* ── details toggle ── */
+    let detailsOpen = true;
+    el("toggle").onclick = () => {
+      detailsOpen = !detailsOpen;
+      el("details").style.display = detailsOpen ? "block" : "none";
+      el("toggle").textContent    = detailsOpen ? "Hide details" : "Show details";
+    };
     setTimeout(() => {
-      if (open) {
-        open = false;
+      if (detailsOpen) {
+        detailsOpen = false;
         el("details").style.display = "none";
-        el("toggle").textContent = "Show details";
+        el("toggle").textContent    = "Show details";
       }
     }, AUTO_COLLAPSE_MS);
 
-    el("co").onclick = (e) => copy(original, e.target);
-    el("cf").onclick = (e) => copy(final, e.target);
-    el("close").onclick = () => ribbon.remove();
-    el("dismiss").onclick = () => ribbon.remove();
+    /* ── apply persisted minimise state ── */
+    chrome.storage.local.get(RIBBON_STATE_KEY, (res) => {
+      if (res[RIBBON_STATE_KEY] === true) setMinimisedState(true, ribbon, miniTab);
+    });
 
-    // Part number resolves async — updates ribbon in-place
+    el("co").onclick = (e) => copy(original, e.target);
+    el("cf").onclick = (e) => copy(final,    e.target);
+
+    /* ── part number async fill ── */
     tryExtractPartNumber().then((partInfo) => {
       const partValueEl = el("cql-part-value");
       const copyBtn     = el("cql-copy-part");
-      if (!partValueEl) return; // ribbon dismissed before resolving
+      if (!partValueEl) return;
 
       if (partInfo) {
-        partValueEl.style.opacity    = "1";
-        partValueEl.style.fontStyle  = "normal";
-        partValueEl.textContent      = partInfo.value;
-        partValueEl.title            = `Source: ${partInfo.source}`;
+        capturedPartNumber          = partInfo.value; // store for TASK_DONE
+        partValueEl.style.opacity   = "1";
+        partValueEl.style.fontStyle = "normal";
+        partValueEl.textContent     = partInfo.value;
+        partValueEl.title           = `Source: ${partInfo.source}`;
 
         copyBtn.style.display = "inline-block";
         copyBtn.onclick = () => {
           navigator.clipboard.writeText(partInfo.value).then(() => {
-            copyBtn.textContent            = "✓ Copied!";
-            copyBtn.style.background       = "#d1e7dd";
-            copyBtn.style.borderColor      = "#a3cfbb";
+            copyBtn.textContent       = "✓ Copied!";
+            copyBtn.style.background  = "#d1e7dd";
+            copyBtn.style.borderColor = "#a3cfbb";
             setTimeout(() => {
               copyBtn.textContent       = "Copy";
               copyBtn.style.background  = "#fff";

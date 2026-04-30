@@ -9,12 +9,12 @@ let completedCount = 0;
 let failedCount = 0;
 let paused = false;
 let taskIdCounter = Date.now();
+let queueCompletionNotified = false; // prevent double-firing
 
 /* =====================================================
-   Session Log — tracks every completed URL for export
+   Session Log
 ===================================================== */
-
-let sessionLog = []; // Array of log entries for today's session
+let sessionLog = [];
 
 function addLogEntry(entry) {
   const now = new Date();
@@ -30,44 +30,34 @@ function addLogEntry(entry) {
 /* =====================================================
    Redirect Observer Engine
 ===================================================== */
-
 let redirectInfoByTab = {};
-let redirectObservers = {}; // tabId -> { lastUrl, timer }
+let redirectObservers = {};
 
 /* =====================================================
    Persistence
 ===================================================== */
-
 function persistState() {
   chrome.storage.local.set({
-    queue,
-    retryQueue,
-    activeTasks,
-    completedCount,
-    failedCount,
-    paused,
-    maxConcurrent,
-    taskIdCounter,
-    sessionLog,
+    queue, retryQueue, activeTasks,
+    completedCount, failedCount, paused,
+    maxConcurrent, taskIdCounter, sessionLog,
   });
 }
 
 async function restoreState() {
   const data = await chrome.storage.local.get(null);
-
-  queue = data.queue || [];
-  retryQueue = data.retryQueue || [];
-  activeTasks = data.activeTasks || {};
+  queue         = data.queue         || [];
+  retryQueue    = data.retryQueue    || [];
+  activeTasks   = data.activeTasks   || {};
   completedCount = data.completedCount || 0;
-  failedCount = data.failedCount || 0;
-  paused = data.paused || false;
+  failedCount   = data.failedCount   || 0;
+  paused        = data.paused        || false;
   maxConcurrent = Math.min(MAX_CONCURRENCY_CAP, data.maxConcurrent || 2);
   taskIdCounter = data.taskIdCounter || Date.now();
 
-  // Restore session log, but only keep today's entries
-  const today = new Date().toLocaleDateString("en-GB");
+  const today  = new Date().toLocaleDateString("en-GB");
   const stored = data.sessionLog || [];
-  sessionLog = stored.filter((e) => e.date === today);
+  sessionLog   = stored.filter((e) => e.date === today);
 
   if (!paused) schedule();
 }
@@ -75,9 +65,50 @@ async function restoreState() {
 restoreState();
 
 /* =====================================================
+   Queue-complete notification
+===================================================== */
+function maybeNotifyComplete() {
+  if (queueCompletionNotified) return;
+  if (queue.length > 0 || retryQueue.length > 0) return;
+  if (Object.keys(activeTasks).length > 0) return;
+  if (completedCount === 0 && failedCount === 0) return;
+
+  queueCompletionNotified = true;
+
+  const redirected = sessionLog.filter(
+    (e) => e.status === "REDIRECTED" || e.status?.startsWith("UNKNOWN")
+  ).length;
+
+  chrome.notifications.create("cql-queue-complete", {
+    type:     "basic",
+    iconUrl:  "icons/icon48.png",
+    title:    "✅ Queue Complete — Controlled Queue Loader",
+    message:  `${completedCount} processed · ${failedCount} failed · ${redirected} redirected / flagged`,
+    buttons:  [{ title: "Download Excel Report" }],
+    priority: 2,
+  });
+}
+
+// Handle notification button click → open popup so user can download
+chrome.notifications.onButtonClicked.addListener((notifId, btnIndex) => {
+  if (notifId === "cql-queue-complete" && btnIndex === 0) {
+    chrome.action.openPopup().catch(() => {
+      // openPopup() can fail if no focused window — fallback: just clear
+    });
+  }
+  chrome.notifications.clear(notifId);
+});
+
+chrome.notifications.onClicked.addListener((notifId) => {
+  if (notifId === "cql-queue-complete") {
+    chrome.action.openPopup().catch(() => {});
+    chrome.notifications.clear(notifId);
+  }
+});
+
+/* =====================================================
    Scheduler
 ===================================================== */
-
 async function schedule() {
   if (paused) return;
 
@@ -90,18 +121,14 @@ async function schedule() {
   }
 
   persistState();
+  maybeNotifyComplete();
 }
 
 async function startTask(task) {
   try {
-    const tab = await chrome.tabs.create({
-      url: task.url,
-      active: false,
-    });
-
+    const tab = await chrome.tabs.create({ url: task.url, active: false });
     task.tabId = tab.id;
     activeTasks[task.id] = task;
-
     startRedirectObserver(tab.id, task.url);
   } catch (err) {
     console.error(`Failed to create tab for task ${task.id}:`, err);
@@ -115,16 +142,11 @@ function handleFailure(task) {
     retryQueue.push(task);
   } else {
     failedCount++;
-    // Log failed entry
     addLogEntry({
-      originalUrl: task.url,
-      finalUrl: task.url,
-      status: "FAILED",
-      redirected: "No",
-      skuOriginal: extractSKU(task.url) || "-",
-      skuFinal: "-",
-      piidOriginal: extractPIID(task.url) || "-",
-      piidFinal: "-",
+      originalUrl: task.url, finalUrl: task.url,
+      status: "FAILED", redirected: "No",
+      skuOriginal: extractSKU(task.url) || "-", skuFinal: "-",
+      piidOriginal: extractPIID(task.url) || "-", piidFinal: "-",
       confidence: 0,
       notes: `Failed after ${task.retries} retries`,
     });
@@ -134,133 +156,92 @@ function handleFailure(task) {
 }
 
 /* =====================================================
-   URL Helpers (mirrored from content.js for logging)
+   URL Helpers
 ===================================================== */
-
 function extractSKU(url) {
   const m = url.match(/-([a-zA-Z0-9]+)\.html/);
   return m ? m[1] : null;
 }
-
 function extractPIID(url) {
   try {
     const v = new URL(url).searchParams.get("piid");
     return v ? v.split("%2C").sort().join(",") : null;
-  } catch {
-    return null;
-  }
+  } catch { return null; }
 }
 
-const INVALID_PATTERNS = [
-  "/sb0/",
-  "/sb1/",
-  "/redir_sku/",
-  "/bnd/",
-  "/brand/",
-  "/cat/",
-];
-
+const INVALID_PATTERNS = ["/sb0/","/sb1/","/redir_sku/","/bnd/","/brand/","/cat/"];
 function looksInvalid(url) {
   if (!url.endsWith(".html") && !url.includes(".html?")) return true;
   return INVALID_PATTERNS.some((p) => url.includes(p));
 }
-
 function confidenceScore({ urlMatch, skuMatch, piidMatch, valid }) {
   if (!valid) return 0;
   let score = 30;
-  if (skuMatch) score += 35;
+  if (skuMatch)  score += 35;
   if (piidMatch) score += 25;
-  if (urlMatch) score += 10;
+  if (urlMatch)  score += 10;
   return Math.min(100, score);
 }
-
 function deriveStatus(original, final) {
-  const invalid = looksInvalid(final);
-  const urlMatch = original === final;
-  const skuO = extractSKU(original);
-  const skuF = extractSKU(final);
-  const piidO = extractPIID(original);
-  const piidF = extractPIID(final);
-  const skuMatch = skuO === skuF;
+  const invalid   = looksInvalid(final);
+  const urlMatch  = original === final;
+  const skuO      = extractSKU(original);
+  const skuF      = extractSKU(final);
+  const piidO     = extractPIID(original);
+  const piidF     = extractPIID(final);
+  const skuMatch  = skuO === skuF;
   const piidMatch = piidO === piidF;
-  const valid = !invalid;
-
+  const valid     = !invalid;
   const confidence = confidenceScore({ urlMatch, skuMatch, piidMatch, valid });
 
   let status = "NO REDIRECTION";
-  if (!urlMatch) status = "REDIRECTED";
-  if (invalid) status = "UNKNOWN: URL IS INVALID";
+  if (!urlMatch)  status = "REDIRECTED";
+  if (invalid)    status = "UNKNOWN: URL IS INVALID";
   if (!piidMatch) status = "UNKNOWN: VARIATION NOT SELECTED";
 
   return {
     status,
-    skuOriginal: skuO || "-",
-    skuFinal: skuF || "-",
-    piidOriginal: piidO || "-",
-    piidFinal: piidF || "-",
+    skuOriginal:  skuO  || "-", skuFinal:  skuF  || "-",
+    piidOriginal: piidO || "-", piidFinal: piidF || "-",
     confidence,
     redirected: urlMatch ? "No" : "Yes",
   };
 }
 
 /* =====================================================
-   Redirect Observer Logic
+   Redirect Observer
 ===================================================== */
-
 function startRedirectObserver(tabId, originalUrl) {
-  redirectObservers[tabId] = {
-    original: originalUrl,
-    lastUrl: originalUrl,
-    timer: null,
-  };
+  redirectObservers[tabId] = { original: originalUrl, lastUrl: originalUrl, timer: null };
 }
-
 function scheduleRedirectFinalize(tabId) {
   const observer = redirectObservers[tabId];
   if (!observer) return;
-
   clearTimeout(observer.timer);
-
   observer.timer = setTimeout(() => {
-    redirectInfoByTab[tabId] = {
-      original: observer.original,
-      final: observer.lastUrl,
-    };
+    redirectInfoByTab[tabId] = { original: observer.original, final: observer.lastUrl };
   }, 2500);
 }
 
 chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
-  if (!redirectObservers[tabId]) return;
-  if (!tab?.url) return;
-
+  if (!redirectObservers[tabId] || !tab?.url) return;
   const observer = redirectObservers[tabId];
-
   if (tab.url !== observer.lastUrl) {
     observer.lastUrl = tab.url;
     scheduleRedirectFinalize(tabId);
   }
-
   if (info.status === "complete") {
-    chrome.scripting
-      .executeScript({
-        target: { tabId },
-        files: ["content.js"],
-      })
+    chrome.scripting.executeScript({ target: { tabId }, files: ["content.js"] })
       .catch((err) => {
-        if (!err.message.includes("Cannot access")) {
-          console.error(
-            `Failed to inject content script in tab ${tabId}:`,
-            err,
-          );
-        }
+        if (!err.message.includes("Cannot access"))
+          console.error(`Failed to inject content script in tab ${tabId}:`, err);
       });
   }
 });
 
 /* =====================================================
-   Tab Removal Handler
+   Tab Removal
 ===================================================== */
-
 chrome.tabs.onRemoved.addListener((tabId) => {
   if (redirectObservers[tabId]) {
     clearTimeout(redirectObservers[tabId].timer);
@@ -269,7 +250,6 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   delete redirectInfoByTab[tabId];
 
   const entry = Object.entries(activeTasks).find(([, t]) => t.tabId === tabId);
-
   if (entry) {
     console.warn(`Tab ${tabId} closed externally, marking task as failed`);
     const task = activeTasks[entry[0]];
@@ -281,7 +261,6 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 /* =====================================================
    Completion
 ===================================================== */
-
 function completeTaskByTabId(tabId, reportData) {
   const entry = Object.entries(activeTasks).find(([, t]) => t.tabId === tabId);
   if (!entry) return;
@@ -290,21 +269,21 @@ function completeTaskByTabId(tabId, reportData) {
   delete activeTasks[entry[0]];
   completedCount++;
 
-  // Build log entry using redirect info + any data from content script
-  const info = redirectInfoByTab[tabId];
+  const info     = redirectInfoByTab[tabId];
   const original = info?.original || task.url;
-  const final = info?.final || task.url;
-  const derived = deriveStatus(original, final);
+  const final    = info?.final    || task.url;
+  const derived  = deriveStatus(original, final);
 
   addLogEntry({
-    originalUrl: original,
-    finalUrl: final,
+    originalUrl: original, finalUrl: final,
     ...derived,
+    // notes now come from the content script (typed by user in ribbon)
     notes: reportData?.notes || "",
+    // part number passed from content script
+    partNumber: reportData?.partNumber || "",
   });
 
   delete redirectInfoByTab[tabId];
-
   if (redirectObservers[tabId]) {
     clearTimeout(redirectObservers[tabId].timer);
     delete redirectObservers[tabId];
@@ -319,56 +298,39 @@ function completeTaskByTabId(tabId, reportData) {
 }
 
 /* =====================================================
-   Helper: Create Task with Validation
+   Helper: Create Task
 ===================================================== */
-
 function createTask(url) {
-  try {
-    new URL(url);
-  } catch (err) {
+  try { new URL(url); } catch {
     console.warn(`Invalid URL skipped: ${url}`);
     return null;
   }
-
-  return {
-    id: taskIdCounter++,
-    url,
-    retries: 0,
-  };
+  return { id: taskIdCounter++, url, retries: 0 };
 }
 
 /* =====================================================
-   Helper: Clean Up All Active Tasks
+   Helper: Clean Up Active Tasks
 ===================================================== */
-
 async function cleanupAllActiveTasks() {
-  const tabIds = Object.values(activeTasks)
-    .map((t) => t.tabId)
-    .filter(Boolean);
-
+  const tabIds = Object.values(activeTasks).map((t) => t.tabId).filter(Boolean);
   if (tabIds.length > 0) {
-    try {
-      await chrome.tabs.remove(tabIds);
-    } catch (err) {
-      console.warn("Some tabs could not be removed:", err);
-    }
+    try { await chrome.tabs.remove(tabIds); }
+    catch (err) { console.warn("Some tabs could not be removed:", err); }
   }
-
   Object.keys(redirectObservers).forEach((tabId) => {
     clearTimeout(redirectObservers[tabId]?.timer);
     delete redirectObservers[tabId];
   });
-
-  activeTasks = {};
+  activeTasks    = {};
   redirectInfoByTab = {};
 }
 
 /* =====================================================
    Messages
 ===================================================== */
-
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   switch (msg.type) {
+
     case "TASK_DONE":
       if (sender.tab?.id) completeTaskByTabId(sender.tab.id, msg.data || {});
       return false;
@@ -377,23 +339,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       (async () => {
         try {
           await cleanupAllActiveTasks();
-
           const tasks = msg.urls.map((url) => createTask(url)).filter(Boolean);
-
-          if (tasks.length === 0) {
-            sendResponse({ success: false, error: "No valid URLs provided" });
-            return;
-          }
-
-          queue = tasks;
-          retryQueue = [];
+          if (tasks.length === 0) { sendResponse({ success: false, error: "No valid URLs provided" }); return; }
+          queue          = tasks;
+          retryQueue     = [];
           completedCount = 0;
-          failedCount = 0;
-          paused = false;
-
+          failedCount    = 0;
+          paused         = false;
+          queueCompletionNotified = false; // reset so notification fires again
           persistState();
           schedule();
-
           sendResponse({ success: true, queued: tasks.length });
         } catch (err) {
           console.error("START_QUEUE error:", err);
@@ -406,15 +361,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       (async () => {
         try {
           await cleanupAllActiveTasks();
-
-          queue = [];
-          retryQueue = [];
+          queue          = [];
+          retryQueue     = [];
           completedCount = 0;
-          failedCount = 0;
-          paused = true;
-
+          failedCount    = 0;
+          paused         = true;
+          queueCompletionNotified = false;
           persistState();
-
           sendResponse({ success: true });
         } catch (err) {
           console.error("CLEAR_QUEUE error:", err);
@@ -433,9 +386,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     case "STATUS":
       sendResponse({
         pending: queue.length,
-        active: Object.keys(activeTasks).length,
+        active:  Object.keys(activeTasks).length,
         completed: completedCount,
-        failed: failedCount,
+        failed:  failedCount,
         paused,
         maxConcurrent,
         logCount: sessionLog.length,
@@ -443,11 +396,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       return true;
 
     case "GET_REDIRECT_INFO":
-      if (sender.tab?.id && redirectInfoByTab[sender.tab.id]) {
-        sendResponse(redirectInfoByTab[sender.tab.id]);
-      } else {
-        sendResponse(null);
-      }
+      sendResponse(sender.tab?.id && redirectInfoByTab[sender.tab.id]
+        ? redirectInfoByTab[sender.tab.id]
+        : null);
       return true;
 
     case "GET_SESSION_LOG":
@@ -460,6 +411,5 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       sendResponse({ success: true });
       return true;
   }
-
   return false;
 });
