@@ -77,3 +77,20 @@ body.popup-container {
 .toast-actions button { margin-left: 6px; padding: 4px 8px; border-radius: 4px; border: none; font-size: 12px; cursor: pointer; }
 .toast-actions .confirm { background: #dc3545; color: #fff; }
 .toast-actions .cancel  { background: #6c757d; color: #fff; }
+
+/* ---------- Inline SVG button icons ---------- */
+/* Keeps arrow icons crisp and font-independent  */
+.btn-svg {
+  width: 12px;
+  height: 12px;
+  vertical-align: middle;
+  margin-right: 3px;
+  margin-top: -1px;   /* optical alignment */
+  flex-shrink: 0;
+}
+
+/* Export button SVG is white to match button text */
+.popup-button.export .btn-svg { color: #fff; }
+
+/* Import-small button SVG matches grey text */
+.popup-button.import-small .btn-svg { color: #495057; }

@@ -318,8 +318,11 @@
       <span style="font-weight:700;color:#212529">${escapeHtml(statusText)}</span>
       <button id="cql-restore" title="Restore ribbon  (Ctrl+Shift+M)"
         style="padding:2px 10px;font-size:11px;font-weight:600;border:1px solid
-               rgba(0,0,0,0.2);border-radius:4px;background:#fff;cursor:pointer;margin-left:4px">
-        ▲ Show
+               rgba(0,0,0,0.2);border-radius:4px;background:#fff;cursor:pointer;
+               margin-left:4px;display:inline-flex;align-items:center;gap:4px">
+        <span style="display:inline-block;width:0;height:0;border-left:4px solid transparent;
+              border-right:4px solid transparent;border-bottom:5px solid #495057;flex-shrink:0"></span>
+        Show
       </button>
     `;
     document.documentElement.appendChild(miniTab);
@@ -339,8 +342,11 @@
         <div style="display:flex;align-items:center;gap:8px">
           <button id="cql-minimise" title="Minimise ribbon  (Ctrl+Shift+M)"
             style="padding:2px 10px;font-size:11px;font-weight:600;border:1px solid
-                   rgba(0,0,0,0.2);border-radius:4px;background:#fff;cursor:pointer">
-            ▼ Minimise
+                   rgba(0,0,0,0.2);border-radius:4px;background:#fff;cursor:pointer;
+                   display:inline-flex;align-items:center;gap:4px">
+            <span style="display:inline-block;width:0;height:0;border-left:4px solid transparent;
+                  border-right:4px solid transparent;border-top:5px solid #495057;flex-shrink:0"></span>
+            Minimise
           </button>
           <span id="close" style="cursor:pointer;font-weight:700;font-size:15px;line-height:1" title="Dismiss">✕</span>
         </div>

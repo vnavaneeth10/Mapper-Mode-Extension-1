@@ -1,6 +1,7 @@
 <!doctype html>
 <html>
   <head>
+    <meta charset="utf-8">
     <link rel="stylesheet" href="popup.css" />
   </head>
   <body class="popup-container">
@@ -15,12 +16,16 @@
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
         <label class="popup-label" style="margin:0">URLs (one per line)</label>
         <button id="importBtn" class="popup-button import-small" title="Import URLs from CSV or Excel file">
-          ⬆ Import CSV / Excel
+          <svg class="btn-svg" viewBox="0 0 10 10" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M5 1v6M2 5l3 3 3-3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M1 9h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
+          Import CSV / Excel
         </button>
       </div>
       <!-- hidden file input -->
       <input type="file" id="importFile" accept=".csv,.xlsx,.xls" style="display:none">
-      <!-- column picker — shown after file parsed if multiple columns found -->
+      <!-- column picker -->
       <div id="importPicker" style="display:none;margin-bottom:6px;padding:8px;background:#f8f9fa;
            border:1px solid #dee2e6;border-radius:6px;font-size:12px">
         <label style="font-weight:600;display:block;margin-bottom:4px">
@@ -39,7 +44,7 @@
         class="popup-textarea"
         placeholder="https://example.com/page-1
 https://example.com/page-2
-— or use ⬆ Import to load from a CSV / Excel file —"></textarea>
+-- or use Import above to load from a CSV / Excel file --"></textarea>
     </div>
 
     <!-- Settings -->
@@ -77,7 +82,11 @@ https://example.com/page-2
       </div>
       <div class="popup-export-actions">
         <button id="downloadReport" class="popup-button export">
-          ⬇ Download Excel Report
+          <svg class="btn-svg" viewBox="0 0 10 10" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M5 1v6M2 5l3 3 3-3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M1 9h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
+          Download Excel Report
         </button>
         <button id="clearLog" class="popup-button ghost" title="Clear today's log">
           Clear log
@@ -88,7 +97,6 @@ https://example.com/page-2
     <!-- Toast -->
     <div id="toast" class="toast hidden"></div>
 
-    <!-- SheetJS for Excel parse + generate -->
     <script src="xlsx.min.js"></script>
     <script src="popup.js"></script>
   </body>

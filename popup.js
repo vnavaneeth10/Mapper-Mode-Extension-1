@@ -211,7 +211,7 @@ els.downloadReport.onclick = () => {
     }
     setTimeout(() => {
       els.downloadReport.disabled    = false;
-      els.downloadReport.textContent = "⬇ Download Excel Report";
+      els.downloadReport.innerHTML = '<svg class="btn-svg" viewBox="0 0 10 10" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M5 1v6M2 5l3 3 3-3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M1 9h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg> Download Excel Report';
       refresh();
     }, 800);
   });
